@@ -398,6 +398,13 @@
     if (m) return { kind: 'bangumi', epId: m[1] };
     m = text.match(/favlist\?fid=(\d+)/i);
     if (m) return { kind: 'favlist', fid: m[1] };
+    m = text.match(/collectiondetail\?sid=(\d+)/i);
+    if (m) {
+      var midMatch = text.match(/space\.bilibili\.com\/(\d+)/i);
+      return { kind: 'collection', sid: m[1], mid: midMatch ? midMatch[1] : '' };
+    }
+    m = text.match(/medialist\/(?:play|detail)\/ml(\d+)/i);
+    if (m) return { kind: 'collection', sid: m[1], mid: '', medialist: true };
     m = text.match(/BV[0-9A-Za-z]{10}/);
     if (m) return { kind: 'video', bvid: m[0] };
     m = text.match(/(?:^|[^A-Za-z0-9])(?:av|AV)(\d+)/);
@@ -470,6 +477,10 @@
         setStatus('loading', '正在读取收藏夹视频…');
         return loadFavlistData(p.fid).then(function (data) { return { p: p, data: data }; });
       }
+      if (p.kind === 'collection') {
+        setStatus('loading', '正在读取合集视频…');
+        return loadCollectionData(p).then(function (data) { return { p: p, data: data }; });
+      }
       setStatus('loading', '正在获取视频信息…');
       return viewByVideo(p).then(function (data) { return { p: p, data: data }; });
     }).then(function (res) {
@@ -479,23 +490,57 @@
         renderSeason(data);
       } else if (res.p.kind === 'favlist') {
         renderFavlist(data);
+      } else if (res.p.kind === 'collection') {
+        renderCollection(data);
       } else {
-        current = {
-          kind: 'video',
-          bvid: data.bvid,
-          aid: data.aid,
-          cid: data.cid,
-          title: data.title,
-          pic: (data.pic || '').replace(/^http:/i, 'https:'),
-          up: data.owner ? data.owner.name : '',
-          duration: data.duration || 0,
-          stat: data.stat || {},
-          pubdate: data.pubdate || 0,
-          pages: (data.pages && data.pages.length) ? data.pages : [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }],
-          pageIndex: 0,
-          degraded: !!data.degraded
-        };
-        renderCurrent();
+        // 合集视频（ugc_season）：视频本身属于某个合集时，展示合集所有集并可批量下载
+        var ugc = data.ugc_season;
+        var ugcEps = (ugc && ugc.sections && ugc.sections.length)
+          ? (function () { var all = []; for (var si = 0; si < ugc.sections.length; si++) { var se = ugc.sections[si].episodes || []; for (var ei = 0; ei < se.length; ei++) all.push(se[ei]); } return all; })()
+          : ((ugc && ugc.episodes) || []);
+        if (ugc && ugcEps.length) {
+          var ugcPages = ugcEps.map(function (ep, i) {
+            return { cid: ep.cid, bvid: ep.bvid || data.bvid, aid: ep.aid || data.aid, page: i + 1, part: ep.title || ('第 ' + (i + 1) + ' 集'), duration: ep.duration || 0, pic: ep.cover || data.pic || '' };
+          });
+          current = {
+            kind: 'video',
+            bvid: ugcPages[0].bvid,
+            aid: ugcPages[0].aid,
+            cid: ugcPages[0].cid,
+            title: (ugc.title || data.title) + '（合集 · ' + ugcEps.length + ' 集）',
+            pic: (ugcPages[0].pic || data.pic || '').replace(/^http:/i, 'https:'),
+            up: data.owner ? data.owner.name : '',
+            duration: ugcPages[0].duration || 0,
+            stat: data.stat || {},
+            pubdate: data.pubdate || 0,
+            pages: ugcPages,
+            pageIndex: 0,
+            degraded: !!data.degraded,
+            favlist: true
+          };
+          renderCurrent();
+          if (btnAll) { btnAll.hidden = false; btnAll.textContent = '下载全部 P（' + ugcPages.length + ' 集）'; }
+          setStatus('ok', '已识别合集（' + ugcEps.length + ' 集），请选择下载或「下载全部」');
+          probeAcceptQuality().then(fillQnOptions);
+        } else {
+          current = {
+            kind: 'video',
+            bvid: data.bvid,
+            aid: data.aid,
+            cid: data.cid,
+            title: data.title,
+            pic: (data.pic || '').replace(/^http:/i, 'https:'),
+            up: data.owner ? data.owner.name : '',
+            duration: data.duration || 0,
+            stat: data.stat || {},
+            pubdate: data.pubdate || 0,
+            pages: (data.pages && data.pages.length) ? data.pages : [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }],
+            pageIndex: 0,
+            degraded: !!data.degraded
+          };
+          renderCurrent();
+          probeAcceptQuality().then(fillQnOptions);
+        }
         // 异步探测服务端可用清晰度（不阻塞信息展示；失败时保持全档可选）
         probeAcceptQuality().then(fillQnOptions);
       }
@@ -605,6 +650,12 @@
     if (p.bvid) current.bvid = p.bvid;
     if (p.aid) current.aid = p.aid;
     current.cid = p.cid;
+    // 合集 API 不返回 cid：选中时异步补全，保证单集下载可用
+    if (!p.cid && p.bvid) {
+      viewByVideo({ bvid: p.bvid, aid: p.aid }).then(function (d) {
+        if (d && d.cid && current.bvid === p.bvid) { current.cid = d.cid; p.cid = d.cid; if (d.aid) { p.aid = d.aid; current.aid = d.aid; } }
+      }).catch(function () { });
+    }
     var chips = pagesList.children;
     for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('active', i === idx);
     setNote('ok', '已切换到 P' + p.page + ' · ' + p.part);
@@ -612,6 +663,61 @@
   }
 
   /* ---------- 收藏夹网址解析（favlist?fid=xx） ---------- */
+  // 合集：空间合集（collectiondetail?sid=）与视频内 ugc_season 合集
+  function loadCollectionData(p) {
+    var sid = p.sid;
+    var mid = p.mid || '';
+    if (p.medialist) {
+      // 旧版 medialist（ml_id）：通过合集 API 取（需登录）
+      var mu = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/series/recArchivesBySeason?season_id=' + sid);
+      return fetch(mu, { credentials: 'include' }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.code && j.code !== 0) throw new Error('读取合集失败：' + (j.message || j.code));
+        var list = (j && j.data && j.data.archives) || [];
+        if (!list.length) throw new Error('该合集暂无视频');
+        return { title: (j.data && j.data.meta && j.data.meta.name) || ('合集 ' + sid), medias: list };
+      });
+    }
+    // seasons_archives_list：返回合集视频列表（archives 不含 cid，下载时按 bvid 动态补全）
+    var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=' + mid + '&season_id=' + sid + '&page_num=1&page_size=50');
+    return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.code && j.code !== 0) throw new Error('读取合集失败：' + (j.message || j.code));
+      var d = (j && j.data) || {};
+      var meta = d.meta || {};
+      var archives = (d.archives || []).filter(function (a) { return a && a.bvid; });
+      if (!archives.length) throw new Error('该合集暂无视频');
+      var medias = archives.map(function (a) {
+        return { bvid: a.bvid, aid: a.aid, title: a.title, duration: a.duration || 0, pic: a.pic || '' };
+      });
+      return { title: meta.title || ('合集 ' + sid), medias: medias, author: meta.upper ? meta.upper.name : '', total: d.page ? d.page.total : medias.length };
+    });
+  }
+  function renderCollection(data) {
+    var medias = data.medias.slice(0, 50);
+    var pages = medias.map(function (m, i) {
+      return { cid: m.cid, bvid: m.bvid, aid: m.aid, page: i + 1, part: m.title, duration: m.duration || 0, pic: m.pic || '' };
+    });
+    var first = pages[0];
+    current = {
+      kind: 'video',
+      bvid: first.bvid,
+      aid: first.aid,
+      cid: first.cid,
+      title: data.title + '（合集 · 前 ' + pages.length + ' 个视频）',
+      pic: (first.pic || '').replace(/^http:/i, 'https:'),
+      up: data.author || '',
+      duration: first.duration || 0,
+      stat: {},
+      pubdate: 0,
+      pages: pages,
+      pageIndex: 0,
+      favlist: true
+    };
+    setFinderState('done');
+    setStatus('ok', '合集解析成功，请选择要下载的视频（或点「下载全部 P」）');
+    resultEl.hidden = false;
+    renderCurrent();
+    if (btnAll) { btnAll.hidden = false; btnAll.textContent = '下载全部 P（' + pages.length + ' 个视频）'; }
+  }
   function loadFavlistData(fid) {
     var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/resource/list?media_id=' + fid + '&pn=1&ps=20');
     return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
@@ -1656,8 +1762,21 @@
     }).catch(function (error) { handleTaskError(task, error); });
   }
   function downloadVideo(task) {
-    // 先等待高清能力探测完成，避免探测前的点击误走直链降级
-    return waitMuxReady().then(function () { return downloadVideoInner(task); });
+    var src = task.source;
+    // 合集等来源可能缺失 cid：下载前兜底补全，避免 playurl 请求失败
+    var ensure = src.cid ? Promise.resolve() : viewByVideo({ bvid: src.bvid, aid: src.aid }).then(function (d) {
+      if (!d || !d.cid) throw new Error('未获取到该视频信息');
+      src.cid = d.cid;
+      if (d.aid) src.aid = d.aid;
+    });
+    return ensure.catch(function (e) {
+      setTaskStatus(task, 'error', '获取视频信息失败');
+      setTaskNote(task, 'fail', e && e.message ? e.message : '未知错误');
+      throw e;
+    }).then(function () {
+      // 先等待高清能力探测完成，避免探测前的点击误走直链降级
+      return waitMuxReady().then(function () { return downloadVideoInner(task); });
+    });
   }
   function downloadVideoInner(task) {
     var current = task.source;
@@ -1884,6 +2003,23 @@
   }
 
   function downloadAudio(task) {
+    var src = task.source;
+    if (task.cancelled) return;
+    // 合集等来源可能缺失 cid：音频下载前兜底补全
+    var ensure = src.cid ? Promise.resolve() : viewByVideo({ bvid: src.bvid, aid: src.aid }).then(function (d) {
+      if (!d || !d.cid) throw new Error('未获取到该视频信息');
+      src.cid = d.cid;
+      if (d.aid) src.aid = d.aid;
+    });
+    return ensure.catch(function (e) {
+      setTaskStatus(task, 'error', '获取视频信息失败');
+      setTaskNote(task, 'fail', e && e.message ? e.message : '未知错误');
+      throw e;
+    }).then(function () {
+      return downloadAudioInner(task);
+    });
+  }
+  function downloadAudioInner(task) {
     var current = task.source;
     if (task.cancelled) return;
     var fmt = task.settings.af;        // m4a（默认原版）/ mp3（转码）
@@ -2501,6 +2637,13 @@
       var map = { queued: '待下载', running: '下载中…', done: '✅ 完成', error: '❌ 失败', cancelled: '已取消' };
       var key = (states[i] && states[i].status) || 'queued';
       st.textContent = map[key] || key;
+      st.title = (states[i] && states[i].note) || '';
+      if (states[i] && states[i].note && key === 'error') {
+        var nt = document.createElement('div');
+        nt.className = 'batch-item-note';
+        nt.textContent = states[i].note;
+        row.appendChild(nt);
+      }
       row.appendChild(name);
       row.appendChild(st);
       batchList.appendChild(row);
@@ -2564,22 +2707,41 @@
       current.cid = p.cid;
       current.pageIndex = rowIdx;
       var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
-      var t = createTask(safeName(current.title) + ' [' + label + ']', batchData.isSeason ? '番剧' : '分P');
-      t.type = type;
-      t._part = ' [' + label + ']';
-      t.settings.clip = '';            // 批量不支持片段裁剪
-      t.settings.danmaku = false;      // 批量界面无附带选项
-      t.settings.subtitle = false;
-      t.settings.format = fmtSelect ? fmtSelect.value : 'mp4';
-      states[rowIdx] = { status: 'running' };
-      renderBatchList(states);
-      try {
-        runTaskByType(t);
-      } catch (e) {
-        setTaskStatus(t, 'error', '启动失败');
-        setTaskNote(t, 'fail', e && e.message ? e.message : '未知错误');
+      // 合集 API 不返回 cid：先补全（含标题/时长）再开始下载，避免任务启动即失败
+      var prepare = Promise.resolve();
+      if (!p.cid && p.bvid) {
+        prepare = viewByVideo({ bvid: p.bvid, aid: p.aid }).then(function (d) {
+          if (!d || !d.cid) throw new Error('未获取到该视频信息');
+          p.cid = d.cid; current.cid = d.cid;
+          if (d.aid) { p.aid = d.aid; current.aid = d.aid; }
+          if (!batchData.isSeason) label = 'P' + p.page + ' · ' + (d.title || p.part || '');
+        }).catch(function (e) {
+          states[rowIdx] = { status: 'error', note: (e && e.message ? e.message : '获取视频信息失败') };
+          renderBatchList(states);
+          throw e;
+        });
       }
-      waitDone(t, rowIdx, next);
+      prepare.then(function () {
+        var t = createTask(safeName(current.title) + ' [' + label + ']', batchData.isSeason ? '番剧' : '分P');
+        t.type = type;
+        t._part = ' [' + label + ']';
+        t.settings.clip = '';            // 批量不支持片段裁剪
+        t.settings.danmaku = false;      // 批量界面无附带选项
+        t.settings.subtitle = false;
+        t.settings.format = fmtSelect ? fmtSelect.value : 'mp4';
+        states[rowIdx] = { status: 'running' };
+        renderBatchList(states);
+        try {
+          runTaskByType(t);
+        } catch (e2) {
+          setTaskStatus(t, 'error', '启动失败');
+          setTaskNote(t, 'fail', e2 && e2.message ? e2.message : '未知错误');
+        }
+        waitDone(t, rowIdx, next);
+      }).catch(function () {
+        // 补 cid 失败：跳过该任务继续下一个
+        waitDone({ status: 'error' }, rowIdx, next);
+      });
     };
     next();
   }
