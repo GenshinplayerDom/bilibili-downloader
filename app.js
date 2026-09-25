@@ -486,7 +486,7 @@
           aid: data.aid,
           cid: data.cid,
           title: data.title,
-          pic: data.pic,
+          pic: (data.pic || '').replace(/^http:/i, 'https:'),
           up: data.owner ? data.owner.name : '',
           duration: data.duration || 0,
           stat: data.stat || {},
@@ -518,7 +518,7 @@
       kind: 'bangumi',
       seasonId: data.season_id,
       title: data.title || data.season_title || '',
-      pic: (episodes[0] && episodes[0].pic) || data.pic || '',
+      pic: ((episodes[0] && episodes[0].pic) || data.pic || '').replace(/^http:/i, 'https:'),
       up: data.up_info ? data.up_info.name : '',
       duration: (episodes[0] && episodes[0].duration) || 0,
       stat: data.stat || {},
@@ -571,6 +571,7 @@
     $('v-views').textContent = deg ? '—' : fmtCount(stat.view);
     $('v-danmaku').textContent = deg ? '—' : fmtCount(stat.danmaku);
     $('v-likes').textContent = deg ? '—' : fmtCount(stat.like);
+    if ($('v-reply')) $('v-reply').textContent = deg ? '—' : fmtCount(stat.reply);
   }
 
   function renderCurrent() {
@@ -633,7 +634,7 @@
       aid: first.aid,
       cid: first.cid,
       title: data.title + '（收藏夹 · 前 ' + pages.length + ' 个视频）',
-      pic: first.pic || '',
+      pic: (first.pic || '').replace(/^http:/i, 'https:'),
       up: '',
       duration: first.duration || 0,
       stat: {},

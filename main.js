@@ -12,7 +12,8 @@ const security = require('./lib/security');
 const { CookieStore } = require('./lib/cookie-store');
 const { Downloader, DownloadControl } = require('./lib/downloader');
 const { pathToFileURL } = require('url');
-const downloader = new Downloader({ cookie: () => proxy.buildCookie() });
+const downloader = new Downloader({ cookie: () => proxy.buildCookie(), connections: 32 });
+// connections=32：DASH 高清下载时视频流 + 音频流同时并发，避免两流平分 16 连接导致实际并发减半
 const controls = new Map();
 let cookieStore, proxyStart;
 let managed = [];
