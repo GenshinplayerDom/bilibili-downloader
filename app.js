@@ -100,6 +100,12 @@
   var listDlSelected = $('list-dl-selected');
   var listTypeSeg = $('list-type-seg');
   var listCancelAll = $('list-cancel-all');
+  var listQn = $('list-qn');
+  var listEnc = $('list-enc');
+  var listFmt = $('list-fmt');
+  var listAf = $('list-af');
+  var listAq = $('list-aq');
+  var listThread = $('list-thread');
   var listEmpty = $('list-empty');
   var homeBtn = $('home-btn');
   var tasksCancelAll = $('tasks-cancel-all');
@@ -709,6 +715,17 @@
       };
     });
     listState = { title: title, kind: kind, items: items, checked: {}, backTo: null };
+    // 同步当前全局下载偏好到列表面板（清晰度/线程/编码/封装/音频格式）
+    if (listQn) {
+      listQn.innerHTML = qnSelect.innerHTML;
+      if (qnSelect.value) listQn.value = qnSelect.value;
+    }
+    if (listEnc && encSelect) listEnc.value = encSelect.value || 'auto';
+    if (listFmt && fmtSelect) listFmt.value = fmtSelect.value || 'mp4';
+    if (listAf && afSelect) listAf.value = afSelect.value || 'm4a';
+    if (listAq && aqSelect) listAq.value = aqSelect.value || '192';
+    if (listThread && threadSelect) listThread.value = threadSelect.value || '8';
+    syncListTypeUi();
     if (listTitle) listTitle.textContent = title + '（' + kind + '）';
     if (listSub) listSub.textContent = '共 ' + items.length + ' 个视频 · 勾选后点击「一键下载勾选」加入下载队列；单击行可进入单个视频下载详情。';
     renderListTable();
@@ -768,6 +785,15 @@
       listTbody.appendChild(tr);
     });
     if (listEmpty) listEmpty.hidden = listState.items.length > 0;
+  }
+  function syncListTypeUi() {
+    var type = listTypeSeg ? ((listTypeSeg.querySelector('.seg-btn.active') || {}).dataset || {}).type || 'video' : 'video';
+    var v = $('list-opt-video'), en = $('list-opt-enc'), fm = $('list-opt-format'), au = $('list-opt-audio'), aq = $('list-opt-aq');
+    if (v) v.hidden = type !== 'video';
+    if (en) en.hidden = type !== 'video' || IS_ANDROID;
+    if (fm) fm.hidden = type !== 'video' || IS_ANDROID;
+    if (au) au.hidden = type !== 'audio';
+    if (aq) aq.hidden = !(type === 'audio' && listAf && listAf.value === 'mp3');
   }
   function fmtNum(n) {
     n = Number(n) || 0;
@@ -860,10 +886,14 @@
     if (!items.length) { showToast('请先勾选要下载的视频', 'warn'); return; }
     var segBtn = listTypeSeg ? listTypeSeg.querySelector('.seg-btn.active') : null;
     var type = segBtn ? segBtn.dataset.type : 'video';
-    // 快照当前全局下载偏好（主界面设置）
+    // 快照列表面板下载选项（用户在此选择清晰度/线程/编码/封装/音频格式）
     var pref = {
-      qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto',
-      format: fmtSelect ? fmtSelect.value : 'mp4', af: afSelect.value, aq: Number(aqSelect.value),
+      qn: listQn && listQn.value ? Number(listQn.value) : Number(qnSelect.value),
+      threads: listThread && listThread.value ? Number(listThread.value) : currentThreads(),
+      enc: (listEnc && listEnc.value) || encSelect.value || 'auto',
+      format: (listFmt && listFmt.value) || (fmtSelect ? fmtSelect.value : 'mp4'),
+      af: (listAf && listAf.value) || afSelect.value || 'm4a',
+      aq: listAq && listAq.value ? Number(listAq.value) : Number(aqSelect.value),
       clip: '', danmaku: false, subtitle: false
     };
     var n = items.length;
@@ -2805,6 +2835,7 @@
     if (batchAf && afSelect) batchAf.value = afSelect.value || 'm4a';
     if (batchAq && aqSelect) batchAq.value = aqSelect.value || '192';
     if (batchThread && threadSelect) batchThread.value = threadSelect.value || '8';
+    if (batchFmt && fmtSelect) batchFmt.value = fmtSelect.value || 'mp4';
     // 渲染任务列表（当前全部待下载）
     renderBatchList(list.map(function () { return { status: 'queued' }; }));
     batchStarted = false;
@@ -2985,6 +3016,11 @@
     var btn = ev.target.closest ? ev.target.closest('.seg-btn') : null;
     if (!btn) return;
     listTypeSeg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.toggle('active', b === btn); });
+    syncListTypeUi();
+  });
+  if (listAf) listAf.addEventListener('change', function () {
+    var aq = $('list-opt-aq');
+    if (aq) aq.hidden = listAf.value !== 'mp3';
   });
   if (listCancelAll) listCancelAll.addEventListener('click', cancelAllTasks);
 

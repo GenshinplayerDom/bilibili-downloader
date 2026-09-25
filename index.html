@@ -276,6 +276,55 @@
     <button type="button" class="mini-btn" id="list-uncheck-all">全不选</button>
     <button type="button" class="mini-btn primary" id="list-dl-selected" disabled>一键下载勾选（0）</button>
   </div>
+  <div class="list-options">
+    <div class="opt-row" id="list-opt-video">
+      <label>清晰度</label>
+      <select id="list-qn"></select>
+    </div>
+    <div class="opt-row lite-hide" id="list-opt-enc">
+      <label>编码</label>
+      <select id="list-enc">
+        <option value="auto" selected>自动（兼容优先）</option>
+        <option value="h264">H.264（最兼容）</option>
+        <option value="h265">H.265（高压缩）</option>
+        <option value="av1">AV1（最高压缩）</option>
+      </select>
+    </div>
+    <div class="opt-row lite-hide" id="list-opt-format">
+      <label>封装</label>
+      <select id="list-fmt">
+        <option value="mp4" selected>MP4（通用兼容）</option>
+        <option value="mkv">MKV（保留全部音轨/字幕）</option>
+      </select>
+    </div>
+    <div class="opt-row" id="list-opt-audio" hidden>
+      <label>格式</label>
+      <select id="list-af">
+        <option value="m4a" selected>M4A（原版无损）</option>
+        <option value="mp3">MP3（转码）</option>
+      </select>
+    </div>
+    <div class="opt-row" id="list-opt-aq" hidden>
+      <label>MP3 音质</label>
+      <select id="list-aq">
+        <option value="128">128 Kbps（良）</option>
+        <option value="192" selected>192 Kbps（优）</option>
+        <option value="320">320 Kbps（极优）</option>
+      </select>
+    </div>
+    <div class="opt-row">
+      <label>线程数</label>
+      <select id="list-thread">
+        <option value="4">4 线程（保守）</option>
+        <option value="6">6 线程</option>
+        <option value="8" selected>8 线程（推荐）</option>
+        <option value="10">10 线程</option>
+        <option value="12">12 线程（极速）</option>
+        <option value="14">14 线程</option>
+        <option value="16">16 线程（最大并发）</option>
+      </select>
+    </div>
+  </div>
   <div class="list-table-wrap">
     <table class="list-table" id="list-table">
       <thead>
