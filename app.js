@@ -727,7 +727,7 @@
     if (listThread && threadSelect) listThread.value = threadSelect.value || '8';
     syncListTypeUi();
     if (listTitle) listTitle.textContent = title + '（' + kind + '）';
-    if (listSub) listSub.textContent = '共 ' + items.length + ' 个视频 · 勾选后点击「一键下载勾选」加入下载队列；单击行可进入单个视频下载详情。';
+    if (listSub) listSub.textContent = '共 ' + items.length + ' 个视频 · 勾选后点击「一键下载勾选」加入下载队列；单击「标题」进入单个视频下载详情，点标题左侧区域可勾选。';
     renderListTable();
     listPanel.hidden = false;
     mainContainer.hidden = true;
@@ -777,10 +777,15 @@
       tdDu.className = 'col-dur';
       tdDu.textContent = fmtDur(it.duration || 0);
       tr.appendChild(tdCk); tr.appendChild(tdCv); tr.appendChild(tdTi); tr.appendChild(tdPl); tr.appendChild(tdDm); tr.appendChild(tdDu);
-      // 单击行（勾选框之外）→ 进入单个视频详情
+      // 点击判定：仅「标题」单元格进入单个视频详情；标题左侧（勾选列/封面/其他区域）判定为勾选该项
       tr.addEventListener('click', function (ev) {
-        if (ev.target === cb || cb.contains(ev.target)) return;
-        openVideoDetailFromList(it);
+        if (ev.target.closest && ev.target.closest('.col-title')) {
+          openVideoDetailFromList(it);
+          return;
+        }
+        if (ev.target === cb || (cb.contains && cb.contains(ev.target))) return;
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
       });
       listTbody.appendChild(tr);
     });
