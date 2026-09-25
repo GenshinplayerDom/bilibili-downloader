@@ -87,6 +87,13 @@
           <option value="av1">AV1（最高压缩）</option>
         </select>
       </div>
+      <div class="opt-row lite-hide" id="opt-format">
+        <label>封装</label>
+        <select id="fmt-select">
+          <option value="mp4" selected>MP4（通用兼容）</option>
+          <option value="mkv">MKV（保留全部音轨/字幕）</option>
+        </select>
+      </div>
       <div class="opt-row" id="opt-audio" hidden>
         <label>格式</label>
         <select id="af-select">
@@ -205,6 +212,13 @@
         <option value="h264">H.264（最兼容）</option>
         <option value="h265">H.265（高压缩）</option>
         <option value="av1">AV1（最高压缩）</option>
+      </select>
+    </div>
+    <div class="opt-row lite-hide" id="batch-opt-format">
+      <label>封装</label>
+      <select id="batch-fmt">
+        <option value="mp4" selected>MP4（通用兼容）</option>
+        <option value="mkv">MKV（保留全部音轨/字幕）</option>
       </select>
     </div>
     <div class="opt-row" id="batch-opt-audio" hidden>

@@ -60,7 +60,7 @@
   var tasksList = $('tasks-list');
   var tasksClearDone = $('tasks-clear-done');
   // v1.2 新增
-  var fmtSelect = null;                  // 封装选项已移除（固定 MP4）
+  var fmtSelect = $('fmt-select');
   var clipInput = $('clip-input');
   var timerInput = $('timer-input');
   var timerCheck = $('timer-check');
@@ -82,6 +82,7 @@
   var batchAf = $('batch-af');
   var batchAq = $('batch-aq');
   var batchThread = $('batch-thread');
+  var batchFmt = $('batch-fmt');
   var batchActive = false;
   var batchTasks = [];
   var batchData = null;
@@ -1409,7 +1410,7 @@
     var t = {
       id: taskSeq,
       source: JSON.parse(JSON.stringify(current)),
-      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: 'mp4', clip: clipInput ? clipInput.value : '', af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku ? extraDanmaku.checked : false, subtitle: extraSub ? extraSub.checked : false },
+      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: fmtSelect ? fmtSelect.value : 'mp4', clip: clipInput ? clipInput.value : '', af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku ? extraDanmaku.checked : false, subtitle: extraSub ? extraSub.checked : false },
       name: name,
       badge: badge,
       status: 'running',
@@ -2498,6 +2499,7 @@
     if (batchAf && afSelect) afSelect.value = batchAf.value;
     if (batchAq && aqSelect) aqSelect.value = batchAq.value;
     if (batchThread && threadSelect) threadSelect.value = batchThread.value;
+    if (batchFmt && fmtSelect) fmtSelect.value = batchFmt.value;
     // 类型 seg 同步
     typeSeg.querySelectorAll('.seg-btn').forEach(function (b) {
       b.classList.toggle('active', b.getAttribute('data-type') === type);
@@ -2551,7 +2553,7 @@
       t.settings.clip = '';            // 批量不支持片段裁剪
       t.settings.danmaku = false;      // 批量界面无附带选项
       t.settings.subtitle = false;
-      t.settings.format = 'mp4';
+      t.settings.format = fmtSelect ? fmtSelect.value : 'mp4';
       states[rowIdx] = { status: 'running' };
       renderBatchList(states);
       try {
@@ -2582,9 +2584,10 @@
         b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
       });
       var type = btn.dataset.type;
-      var v = $('batch-opt-video'), en = $('batch-opt-enc'), au = $('batch-opt-audio'), aq = $('batch-opt-aq');
+      var v = $('batch-opt-video'), en = $('batch-opt-enc'), fm = $('batch-opt-format'), au = $('batch-opt-audio'), aq = $('batch-opt-aq');
       if (v) v.hidden = type !== 'video';
       if (en) en.hidden = type !== 'video' || IS_ANDROID;
+      if (fm) fm.hidden = type !== 'video' || IS_ANDROID;
       if (au) au.hidden = type !== 'audio';
       if (aq) aq.hidden = !(type === 'audio' && batchAf.value === 'mp3');
     });
