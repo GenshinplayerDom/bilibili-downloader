@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; connect-src 'self' https: http://127.0.0.1:* http://127.0.0.2:* http://127.0.0.3:* http://localhost:*; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>哔哩下载器 · GenshinplayerDom</title>
 <link rel="stylesheet" href="styles.css">
@@ -345,8 +346,8 @@
   </div>
 </div>
 
-<script src="lame.min.js"></script>
-<script src="app.js"></script>
+<script defer src="lame.min.js"></script>
+<script defer src="app.js"></script>
 
 <!-- 首次使用说明弹窗 -->
 <div class="guide-modal" id="guide-modal" hidden>

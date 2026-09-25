@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+def releaseStore = System.getenv('BILI_KEYSTORE')
+
 android {
     namespace 'com.dom.bilidownloader'
     compileSdk 34
@@ -8,16 +10,18 @@ android {
         applicationId "com.dom.bilidownloader"
         minSdk 24
         targetSdk 34
-        versionCode 11
-        versionName "1.2.0"
+        versionCode 13
+        versionName "1.3.0"
     }
 
     signingConfigs {
-        release {
-            storeFile file('../bili-release.keystore')
-            storePassword 'dom2026bili'
-            keyAlias 'bili'
-            keyPassword 'dom2026bili'
+        if (releaseStore) {
+            release {
+                storeFile file(releaseStore)
+                storePassword System.getenv('BILI_STORE_PASSWORD')
+                keyAlias System.getenv('BILI_KEY_ALIAS')
+                keyPassword System.getenv('BILI_KEY_PASSWORD')
+            }
         }
     }
 
@@ -29,7 +33,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.release
+            if (releaseStore) signingConfig signingConfigs.release
         }
     }
 }

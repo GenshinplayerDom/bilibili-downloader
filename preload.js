@@ -26,6 +26,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('biliAPI', {
   isElectron: true,
+  proxyConfig: function () { return ipcRenderer.invoke('bili:proxy-config'); },
+  pauseDownload: function (token) { return ipcRenderer.invoke('bili:download-pause', token); },
+  resumeDownload: function (token) { return ipcRenderer.invoke('bili:download-resume', token); },
   login: function () {
     return ipcRenderer.invoke('bili:login');
   },
@@ -102,7 +105,7 @@ contextBridge.exposeInMainWorld('biliAPI', {
       if (cb) cb(data);
     });
   },
-  /* 直链流式下载（低内存 + 断点续传 .part + 实时速度） */
+  /* 直链流式下载（低内存 + 会话内暂停恢复 + 实时速度） */
   streamDownload: function (payload) {
     return ipcRenderer.invoke('bili:stream-download', payload || {});
   },
@@ -135,6 +138,5 @@ contextBridge.exposeInMainWorld('biliAPI', {
   },
   importSettings: function () {
     return ipcRenderer.invoke('bili:import-settings');
-  },
-  isElectron: true
+  }
 });

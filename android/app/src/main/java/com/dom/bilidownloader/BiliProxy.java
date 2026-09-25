@@ -108,12 +108,15 @@ public class BiliProxy {
     private Resp httpsGet(String url, Map<String, String> headers) throws IOException {
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
+            URL target = UrlPolicy.validate(url, "expand");
+            conn = (HttpURLConnection) target.openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("GET");
-            for (Map.Entry<String, String> e : headers.entrySet()) conn.setRequestProperty(e.getKey(), e.getValue());
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                if (!e.getKey().equalsIgnoreCase("Cookie") || UrlPolicy.api(new URL(url))) conn.setRequestProperty(e.getKey(), e.getValue());
+            }
             int status = conn.getResponseCode();
             Map<String, String> out = new LinkedHashMap<>();
             for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
@@ -141,12 +144,14 @@ public class BiliProxy {
     private Resp httpsPost(String url, Map<String, String> headers) throws IOException {
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn = (HttpURLConnection) UrlPolicy.validate(url, "api").openConnection();
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(30000);
             conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("POST");
-            for (Map.Entry<String, String> e : headers.entrySet()) conn.setRequestProperty(e.getKey(), e.getValue());
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                if (!e.getKey().equalsIgnoreCase("Cookie") || UrlPolicy.api(new URL(url))) conn.setRequestProperty(e.getKey(), e.getValue());
+            }
             conn.setDoOutput(true);
             conn.setFixedLengthStreamingMode(0);
             conn.getOutputStream().close();
@@ -267,6 +272,7 @@ public class BiliProxy {
 
     /* ---------- 短链展开 ---------- */
     private String expand(String url, int depth) throws IOException {
+        url = UrlPolicy.validate(url, "expand").toString();
         if (depth > 6) return url;
         Resp r = httpsGet(url, baseHeaders(null));
         if (r.status >= 300 && r.status < 400 && r.headers.get("location") != null) {
@@ -371,6 +377,7 @@ public class BiliProxy {
                     return res;
                 }
                 try {
+                    u = UrlPolicy.validate(u, "api").toString();
                     ensureBuvid(false);
                     Resp r = biliGet(u);   // 内建 412 递增退避 + 换身份重试
                     res.status = r.status;
@@ -394,7 +401,8 @@ public class BiliProxy {
                     return res;
                 }
                 try {
-                    HttpURLConnection conn = (HttpURLConnection) new URL(u).openConnection();
+                    URL target = UrlPolicy.validate(u, "media");
+                    HttpURLConnection conn = (HttpURLConnection) target.openConnection();
                     conn.setConnectTimeout(15000);
                     conn.setReadTimeout(60000);
                     conn.setInstanceFollowRedirects(false);
@@ -402,7 +410,7 @@ public class BiliProxy {
                     Map<String, String> h = baseHeaders("https://www.bilibili.com/");
                     h.remove("Cookie"); // 媒体流仅带身份 cookie 可能触发风控，保留仍可
                     String ck = buildCookie();
-                    if (!ck.isEmpty()) h.put("Cookie", ck);
+                    if (UrlPolicy.api(target) && !ck.isEmpty()) h.put("Cookie", ck);
                     for (Map.Entry<String, String> e : h.entrySet()) conn.setRequestProperty(e.getKey(), e.getValue());
                     String range = reqHeaders.get("range");
                     if (range != null) conn.setRequestProperty("Range", range);
