@@ -791,9 +791,47 @@ body {
 .fav-url { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--sub); }
 .fav-url span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .fav-url .mini-btn { padding: 2px 8px; font-size: 11px; white-space: nowrap; }
+/* 设置页开源链接 */
+.set-link {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  text-align: left;
+  text-decoration: underline;
+  word-break: break-all;
+}
+.set-link:hover { color: #1d4ed8; }
+
 /* Task controls remain usable at narrow desktop widths. */
 .task-head { flex-wrap: wrap; }
 .task-pause, .task-retry { border: 1px solid #c4cddd; border-radius: 6px; background: transparent; color: inherit; padding: 4px 10px; cursor: pointer; }
 .task-pause:hover, .task-retry:hover { background: rgba(100, 130, 180, .12); }
 .task-pause:disabled { opacity: .55; cursor: wait; }
 .task-pause[hidden], .task-retry[hidden], .task-cancel[hidden] { display: none; }
+
+/* UI 模式切换（精简版 / 完全版） */
+.ui-switch {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.ui-switch-btn {
+  background: transparent;
+  border: 1px solid var(--border, #d9dce3);
+  border-radius: 14px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--sub, #888);
+  cursor: pointer;
+  transition: all .15s;
+}
+.ui-switch-btn.active {
+  background: var(--accent, #fb7299);
+  border-color: var(--accent, #fb7299);
+  color: #fff;
+}
+.ui-switch-btn:not(.active):hover { border-color: var(--accent, #fb7299); color: var(--accent, #fb7299); }

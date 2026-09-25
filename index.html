@@ -28,6 +28,12 @@
 
 <main class="container">
 
+  <!-- UI 模式切换（精简版 / 完全版） -->
+  <div class="ui-switch" id="ui-switch" title="切换界面模式">
+    <button type="button" class="ui-switch-btn" data-mode="lite">精简版（老版 UI）</button>
+    <button type="button" class="ui-switch-btn active" data-mode="full">完全版（当前）</button>
+  </div>
+
   <!-- 主操作区（中间偏上） -->
   <section class="card finder-card">
     <div class="input-wrap" id="finder">
@@ -46,7 +52,7 @@
       <div class="video-meta">
         <div class="v-title" id="v-title"></div>
         <div class="v-up" id="v-up"></div>
-        <div class="v-stats">
+        <div class="v-stats lite-hide">
           <span>▶ <b id="v-views">0</b> 播放</span>
           <span>💬 <b id="v-danmaku">0</b> 弹幕</span>
           <span>👍 <b id="v-likes">0</b> 点赞</span>
@@ -72,7 +78,7 @@
         <label>清晰度</label>
         <select id="qn-select"></select>
       </div>
-      <div class="opt-row" id="opt-enc">
+      <div class="opt-row lite-hide" id="opt-enc">
         <label>编码</label>
         <select id="enc-select">
           <option value="auto" selected>自动（兼容优先 · 推荐）</option>
@@ -108,25 +114,25 @@
           <option value="16">16 线程（最大并发）</option>
         </select>
       </div>
-      <div class="opt-row" id="opt-format">
+      <div class="opt-row lite-hide" id="opt-format">
         <label>封装</label>
         <select id="fmt-select">
           <option value="mp4" selected>MP4（最兼容）</option>
           <option value="mkv">MKV（保留多轨）</option>
         </select>
       </div>
-      <div class="opt-row" id="opt-clip">
+      <div class="opt-row lite-hide" id="opt-clip">
         <label>片段</label>
         <input type="text" id="clip-input" placeholder="可选：起始-结束，如 00:30-01:15（秒 / 分:秒）">
       </div>
-      <div class="opt-row" id="opt-timer">
+      <div class="opt-row lite-hide" id="opt-timer">
         <label>定时</label>
         <span class="opt-inline">
           <input type="time" id="timer-input" value="">
           <label class="checkbox-label"><input type="checkbox" id="timer-check"> 定时开始</label>
         </span>
       </div>
-      <div class="opt-row" id="opt-extra">
+      <div class="opt-row lite-hide" id="opt-extra">
         <label>附带</label>
         <span class="opt-inline">
           <label class="checkbox-label"><input type="checkbox" id="extra-danmaku"> 弹幕 XML</label>
@@ -136,7 +142,7 @@
 
       <div class="opt-row" id="opt-actions">
         <button type="button" class="mini-btn" id="btn-all" hidden>下载全部 P / 集</button>
-        <button type="button" class="mini-btn" id="btn-export" title="导出视频信息 / 封面 / 摘要到下载目录">导出信息</button>
+        <button type="button" class="mini-btn lite-hide" id="btn-export" title="导出视频信息 / 封面 / 摘要到下载目录">导出信息</button>
       </div>
 
       <button type="button" class="dl-btn" id="dl-btn">

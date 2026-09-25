@@ -811,3 +811,27 @@ body {
 .task-pause:hover, .task-retry:hover { background: rgba(100, 130, 180, .12); }
 .task-pause:disabled { opacity: .55; cursor: wait; }
 .task-pause[hidden], .task-retry[hidden], .task-cancel[hidden] { display: none; }
+
+/* UI 模式切换（精简版 / 完全版） */
+.ui-switch {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.ui-switch-btn {
+  background: transparent;
+  border: 1px solid var(--border, #d9dce3);
+  border-radius: 14px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--sub, #888);
+  cursor: pointer;
+  transition: all .15s;
+}
+.ui-switch-btn.active {
+  background: var(--accent, #fb7299);
+  border-color: var(--accent, #fb7299);
+  color: #fff;
+}
+.ui-switch-btn:not(.active):hover { border-color: var(--accent, #fb7299); color: var(--accent, #fb7299); }

@@ -2866,6 +2866,30 @@
   updateDlCacheCount();
   refreshDlDir();
 
+  // ---- UI 模式切换：精简版（老版 UI）/ 完全版（当前） ----
+  var uiSwitch = $('ui-switch');
+  var liteEls = document.querySelectorAll('.lite-hide');
+  function applyUiMode(mode) {
+    var lite = mode === 'lite';
+    if (uiSwitch) {
+      var btns = uiSwitch.querySelectorAll('.ui-switch-btn');
+      for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === mode);
+    }
+    for (var j = 0; j < liteEls.length; j++) liteEls[j].hidden = lite;
+    try { localStorage.setItem('biliUiMode', mode); } catch (e) { }
+  }
+  if (uiSwitch) {
+    uiSwitch.addEventListener('click', function (ev) {
+      var btn = ev.target.closest ? ev.target.closest('.ui-switch-btn') : null;
+      if (!btn) return;
+      applyUiMode(btn.getAttribute('data-mode'));
+      showToast(btn.getAttribute('data-mode') === 'lite' ? '已切换到精简版（老版 UI）' : '已切换到完全版（当前）', 'ok');
+    });
+    var savedMode = 'full';
+    try { savedMode = localStorage.getItem('biliUiMode') || 'full'; } catch (e) { }
+    applyUiMode(savedMode);
+  }
+
   // 代理自动重连：客户端版代理异步就绪，未连接时每 2 秒自动重检，
   // 连接成功后停止；避免启动初期显示“未连接”需手动刷新
   var proxyRetryTimer = null;
