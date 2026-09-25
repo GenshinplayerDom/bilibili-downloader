@@ -114,13 +114,6 @@
           <option value="16">16 线程（最大并发）</option>
         </select>
       </div>
-      <div class="opt-row lite-hide" id="opt-format">
-        <label>封装</label>
-        <select id="fmt-select">
-          <option value="mp4" selected>MP4（最兼容）</option>
-          <option value="mkv">MKV（保留多轨）</option>
-        </select>
-      </div>
       <div class="opt-row lite-hide" id="opt-clip">
         <label>片段</label>
         <input type="text" id="clip-input" placeholder="可选：起始-结束，如 00:30-01:15（秒 / 分:秒）">
@@ -181,6 +174,68 @@
   <div class="history-sub">历史下载记录（持久保存，可打开 / 定位 / 删除文件）</div>
   <div class="history-list" id="history-list"></div>
   <div class="history-empty" id="history-empty" hidden>暂无下载记录</div>
+</section>
+
+<!-- 批量下载页（替换主界面） -->
+<section class="batch-panel" id="batch-panel" hidden>
+  <div class="batch-head">
+    <h2>批量下载</h2>
+    <div class="batch-head-actions">
+      <button type="button" class="mini-btn primary" id="batch-start" title="按下方选项顺序下载全部任务">开始批量下载</button>
+      <button type="button" class="icon-btn" id="batch-back" title="返回">←</button>
+    </div>
+  </div>
+  <div class="batch-sub" id="batch-sub"></div>
+  <div class="batch-options">
+    <div class="opt-row">
+      <label>类型</label>
+      <div class="type-seg" id="batch-type-seg" role="tablist">
+        <button type="button" class="seg-btn active" data-type="video" aria-selected="true">视频</button>
+        <button type="button" class="seg-btn" data-type="audio" aria-selected="false">音频</button>
+      </div>
+    </div>
+    <div class="opt-row" id="batch-opt-video">
+      <label>清晰度</label>
+      <select id="batch-qn"></select>
+    </div>
+    <div class="opt-row lite-hide" id="batch-opt-enc">
+      <label>编码</label>
+      <select id="batch-enc">
+        <option value="auto" selected>自动（兼容优先）</option>
+        <option value="h264">H.264（最兼容）</option>
+        <option value="h265">H.265（高压缩）</option>
+        <option value="av1">AV1（最高压缩）</option>
+      </select>
+    </div>
+    <div class="opt-row" id="batch-opt-audio" hidden>
+      <label>格式</label>
+      <select id="batch-af">
+        <option value="m4a" selected>M4A（原版无损）</option>
+        <option value="mp3">MP3（转码）</option>
+      </select>
+    </div>
+    <div class="opt-row" id="batch-opt-aq" hidden>
+      <label>MP3 音质</label>
+      <select id="batch-aq">
+        <option value="128">128 Kbps（良）</option>
+        <option value="192" selected>192 Kbps（优）</option>
+        <option value="320">320 Kbps（极优）</option>
+      </select>
+    </div>
+    <div class="opt-row">
+      <label>线程数</label>
+      <select id="batch-thread">
+        <option value="4">4 线程（保守）</option>
+        <option value="6">6 线程</option>
+        <option value="8" selected>8 线程（推荐）</option>
+        <option value="10">10 线程</option>
+        <option value="12">12 线程（极速）</option>
+        <option value="14">14 线程</option>
+        <option value="16">16 线程（最大并发）</option>
+      </select>
+    </div>
+  </div>
+  <div class="batch-list" id="batch-list"></div>
 </section>
 
 <!-- 左侧竖向设置侧边栏 -->
