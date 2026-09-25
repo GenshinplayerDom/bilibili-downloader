@@ -89,6 +89,27 @@
   var batchStarted = false;
   var playerClose = $('player-close');
   var playerTitle = $('player-title');
+  // v1.4：合集/收藏夹视频表格列表 + 并发调度 + 主菜单
+  var listPanel = $('list-panel');
+  var listTitle = $('list-title');
+  var listSub = $('list-sub');
+  var listTbody = $('list-tbody');
+  var listBack = $('list-back');
+  var listCheckAll = $('list-check-all');
+  var listUncheckAll = $('list-uncheck-all');
+  var listDlSelected = $('list-dl-selected');
+  var listTypeSeg = $('list-type-seg');
+  var listCancelAll = $('list-cancel-all');
+  var listEmpty = $('list-empty');
+  var homeBtn = $('home-btn');
+  var tasksCancelAll = $('tasks-cancel-all');
+  var batchCancelAll = $('batch-cancel-all');
+  var maxConcurrentSelect = $('max-concurrent');
+  var concNote = $('conc-note');
+  var listState = null;      // { title, kind, items, checked:Set, backTo:null }
+  var maxConcurrent = 8;     // 同时下载数上限（设置可调）
+  var runningCount = 0;      // 正在执行的任务数
+  var taskQueue = [];        // 排队等待的任务 { t, run }
   var favBtn = $('fav-btn');
   var favList = $('fav-list');
   var favNote = $('fav-note');
@@ -493,54 +514,23 @@
       } else if (res.p.kind === 'collection') {
         renderCollection(data);
       } else {
-        // 合集视频（ugc_season）：视频本身属于某个合集时，展示合集所有集并可批量下载
-        var ugc = data.ugc_season;
-        var ugcEps = (ugc && ugc.sections && ugc.sections.length)
-          ? (function () { var all = []; for (var si = 0; si < ugc.sections.length; si++) { var se = ugc.sections[si].episodes || []; for (var ei = 0; ei < se.length; ei++) all.push(se[ei]); } return all; })()
-          : ((ugc && ugc.episodes) || []);
-        if (ugc && ugcEps.length) {
-          var ugcPages = ugcEps.map(function (ep, i) {
-            return { cid: ep.cid, bvid: ep.bvid || data.bvid, aid: ep.aid || data.aid, page: i + 1, part: ep.title || ('第 ' + (i + 1) + ' 集'), duration: ep.duration || 0, pic: ep.cover || data.pic || '' };
-          });
-          current = {
-            kind: 'video',
-            bvid: ugcPages[0].bvid,
-            aid: ugcPages[0].aid,
-            cid: ugcPages[0].cid,
-            title: (ugc.title || data.title) + '（合集 · ' + ugcEps.length + ' 集）',
-            pic: (ugcPages[0].pic || data.pic || '').replace(/^http:/i, 'https:'),
-            up: data.owner ? data.owner.name : '',
-            duration: ugcPages[0].duration || 0,
-            stat: data.stat || {},
-            pubdate: data.pubdate || 0,
-            pages: ugcPages,
-            pageIndex: 0,
-            degraded: !!data.degraded,
-            favlist: true
-          };
-          renderCurrent();
-          if (btnAll) { btnAll.hidden = false; btnAll.textContent = '下载全部 P（' + ugcPages.length + ' 集）'; }
-          setStatus('ok', '已识别合集（' + ugcEps.length + ' 集），请选择下载或「下载全部」');
-          probeAcceptQuality().then(fillQnOptions);
-        } else {
-          current = {
-            kind: 'video',
-            bvid: data.bvid,
-            aid: data.aid,
-            cid: data.cid,
-            title: data.title,
-            pic: (data.pic || '').replace(/^http:/i, 'https:'),
-            up: data.owner ? data.owner.name : '',
-            duration: data.duration || 0,
-            stat: data.stat || {},
-            pubdate: data.pubdate || 0,
-            pages: (data.pages && data.pages.length) ? data.pages : [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }],
-            pageIndex: 0,
-            degraded: !!data.degraded
-          };
-          renderCurrent();
-          probeAcceptQuality().then(fillQnOptions);
-        }
+        // 单个视频链接只展示该视频本身，不扩展视频内其他合集/自动播放链接
+        current = {
+          kind: 'video',
+          bvid: data.bvid,
+          aid: data.aid,
+          cid: data.cid,
+          title: data.title,
+          pic: (data.pic || '').replace(/^http:/i, 'https:'),
+          up: data.owner ? data.owner.name : '',
+          duration: data.duration || 0,
+          stat: data.stat || {},
+          pubdate: data.pubdate || 0,
+          pages: (data.pages && data.pages.length) ? data.pages : [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }],
+          pageIndex: 0,
+          degraded: !!data.degraded
+        };
+        renderCurrent();
         // 异步探测服务端可用清晰度（不阻塞信息展示；失败时保持全档可选）
         probeAcceptQuality().then(fillQnOptions);
       }
@@ -686,37 +676,13 @@
       var archives = (d.archives || []).filter(function (a) { return a && a.bvid; });
       if (!archives.length) throw new Error('该合集暂无视频');
       var medias = archives.map(function (a) {
-        return { bvid: a.bvid, aid: a.aid, title: a.title, duration: a.duration || 0, pic: a.pic || '' };
+        return { bvid: a.bvid, aid: a.aid, title: a.title, duration: a.duration || 0, pic: a.pic || '', stat: a.stat || {} };
       });
       return { title: meta.title || ('合集 ' + sid), medias: medias, author: meta.upper ? meta.upper.name : '', total: d.page ? d.page.total : medias.length };
     });
   }
   function renderCollection(data) {
-    var medias = data.medias.slice(0, 50);
-    var pages = medias.map(function (m, i) {
-      return { cid: m.cid, bvid: m.bvid, aid: m.aid, page: i + 1, part: m.title, duration: m.duration || 0, pic: m.pic || '' };
-    });
-    var first = pages[0];
-    current = {
-      kind: 'video',
-      bvid: first.bvid,
-      aid: first.aid,
-      cid: first.cid,
-      title: data.title + '（合集 · 前 ' + pages.length + ' 个视频）',
-      pic: (first.pic || '').replace(/^http:/i, 'https:'),
-      up: data.author || '',
-      duration: first.duration || 0,
-      stat: {},
-      pubdate: 0,
-      pages: pages,
-      pageIndex: 0,
-      favlist: true
-    };
-    setFinderState('done');
-    setStatus('ok', '合集解析成功，请选择要下载的视频（或点「下载全部 P」）');
-    resultEl.hidden = false;
-    renderCurrent();
-    if (btnAll) { btnAll.hidden = false; btnAll.textContent = '下载全部 P（' + pages.length + ' 个视频）'; }
+    openListPanel(data.title || ('合集 ' + (listState && listState.sid || '')), '合集', data.medias);
   }
   function loadFavlistData(fid) {
     var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/resource/list?media_id=' + fid + '&pn=1&ps=20');
@@ -729,32 +695,202 @@
     });
   }
   function renderFavlist(data) {
-    var medias = data.medias.slice(0, 50);
-    var pages = medias.map(function (m, i) {
-      return { cid: m.cid, bvid: m.bvid, aid: m.aid, page: i + 1, part: m.title, duration: m.duration || 0, pic: m.pic || '' };
+    openListPanel(data.title || ('收藏夹 ' + (listState && listState.fid || '')), '收藏夹', data.medias);
+  }
+
+  /* ---------- v1.4：合集/收藏夹视频表格列表 ---------- */
+  function openListPanel(title, kind, medias) {
+    var items = (medias || []).slice(0, 50).map(function (m, i) {
+      return {
+        bvid: m.bvid, aid: m.aid, cid: m.cid || 0,
+        title: m.title || ('视频 ' + (i + 1)), duration: m.duration || 0,
+        pic: (m.pic || '').replace(/^http:/i, 'https:'),
+        stat: m.stat || {}, page: i + 1
+      };
     });
-    var first = pages[0];
+    listState = { title: title, kind: kind, items: items, checked: {}, backTo: null };
+    if (listTitle) listTitle.textContent = title + '（' + kind + '）';
+    if (listSub) listSub.textContent = '共 ' + items.length + ' 个视频 · 勾选后点击「一键下载勾选」加入下载队列；单击行可进入单个视频下载详情。';
+    renderListTable();
+    listPanel.hidden = false;
+    mainContainer.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (historyPanel) historyPanel.hidden = true;
+    if (settingsPanel) settingsPanel.hidden = true;
+    if (settingsMask) settingsMask.hidden = true;
+    updateListDlBtn();
+  }
+  function renderListTable() {
+    if (!listTbody || !listState) return;
+    listTbody.innerHTML = '';
+    listState.items.forEach(function (it, i) {
+      var tr = document.createElement('tr');
+      if (listState.checked[it.bvid]) tr.className = 'row-checked';
+      var tdCk = document.createElement('td');
+      tdCk.className = 'col-check';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!listState.checked[it.bvid];
+      cb.addEventListener('change', function () {
+        if (cb.checked) listState.checked[it.bvid] = true; else delete listState.checked[it.bvid];
+        tr.classList.toggle('row-checked', cb.checked);
+        updateListDlBtn();
+      });
+      tdCk.appendChild(cb);
+      var tdCv = document.createElement('td');
+      tdCv.className = 'col-cover';
+      var img = document.createElement('img');
+      img.className = 'list-cover';
+      img.src = it.pic || '';
+      img.alt = '';
+      img.onerror = function () { this.style.visibility = 'hidden'; };
+      tdCv.appendChild(img);
+      var tdTi = document.createElement('td');
+      tdTi.className = 'col-title list-title-cell';
+      tdTi.textContent = 'P' + it.page + ' · ' + it.title;
+      tdTi.title = it.title;
+      var tdPl = document.createElement('td');
+      tdPl.className = 'col-play';
+      tdPl.textContent = fmtNum(it.stat.view);
+      var tdDm = document.createElement('td');
+      tdDm.className = 'col-danmaku';
+      tdDm.textContent = fmtNum(it.stat.danmaku);
+      var tdDu = document.createElement('td');
+      tdDu.className = 'col-dur';
+      tdDu.textContent = fmtDur(it.duration || 0);
+      tr.appendChild(tdCk); tr.appendChild(tdCv); tr.appendChild(tdTi); tr.appendChild(tdPl); tr.appendChild(tdDm); tr.appendChild(tdDu);
+      // 单击行（勾选框之外）→ 进入单个视频详情
+      tr.addEventListener('click', function (ev) {
+        if (ev.target === cb || cb.contains(ev.target)) return;
+        openVideoDetailFromList(it);
+      });
+      listTbody.appendChild(tr);
+    });
+    if (listEmpty) listEmpty.hidden = listState.items.length > 0;
+  }
+  function fmtNum(n) {
+    n = Number(n) || 0;
+    if (n >= 100000000) return (n / 100000000).toFixed(1) + ' 亿';
+    if (n >= 10000) return (n / 10000).toFixed(1) + ' 万';
+    return String(n);
+  }
+  function updateListDlBtn() {
+    if (!listDlSelected || !listState) return;
+    var n = Object.keys(listState.checked).length;
+    listDlSelected.disabled = n === 0;
+    listDlSelected.textContent = '一键下载勾选（' + n + '）';
+  }
+  // 从列表单击某个视频 → 渲染为单个视频详情（主下载界面），可返回列表
+  function openVideoDetailFromList(item) {
+    if (!listState) return;
+    listState.backTo = 'list';
+    setFinderState('done');
+    setStatus('loading', '正在获取视频详情…');
+    // 构造单视频渲染数据
+    var d = {
+      bvid: item.bvid, aid: item.aid, cid: item.cid,
+      title: item.title, pic: item.pic, duration: item.duration,
+      stat: item.stat, pubdate: 0, owner: null,
+      pages: [{ cid: item.cid, page: 1, part: item.title, duration: item.duration }],
+      degraded: false
+    };
+    if (!item.cid || !item.pic || !item.title) {
+      viewByVideo({ bvid: item.bvid, aid: item.aid }).then(function (v) {
+        if (v) { d.title = v.title || d.title; d.pic = (v.pic || d.pic).replace(/^http:/i, 'https:'); d.duration = v.duration || d.duration; d.stat = v.stat || d.stat; d.owner = v.owner || null; d.cid = v.cid || d.cid; if (v.pages && v.pages.length) d.pages = v.pages; }
+        finishDetail(d, item);
+      }).catch(function () { finishDetail(d, item); });
+    } else {
+      finishDetail(d, item);
+    }
+  }
+  function finishDetail(d, item) {
     current = {
       kind: 'video',
-      bvid: first.bvid,
-      aid: first.aid,
-      cid: first.cid,
-      title: data.title + '（收藏夹 · 前 ' + pages.length + ' 个视频）',
-      pic: (first.pic || '').replace(/^http:/i, 'https:'),
-      up: '',
-      duration: first.duration || 0,
-      stat: {},
-      pubdate: 0,
-      pages: pages,
+      bvid: d.bvid,
+      aid: d.aid,
+      cid: d.cid,
+      title: d.title,
+      pic: d.pic,
+      up: d.owner ? d.owner.name : '',
+      duration: d.duration || 0,
+      stat: d.stat || {},
+      pubdate: d.pubdate || 0,
+      pages: (d.pages && d.pages.length) ? d.pages : [{ cid: d.cid, page: 1, part: d.title, duration: d.duration }],
       pageIndex: 0,
-      favlist: true
+      degraded: !!d.degraded
     };
-    setFinderState('done');
-    setStatus('ok', '收藏夹解析成功，请选择要下载的视频（或点「下载全部 P」）');
+    // 列表项若有 cid 直接写入，避免重复补全
+    if (item.cid) current.cid = item.cid;
+    if (current.pages[0] && !current.pages[0].cid && item.cid) current.pages[0].cid = item.cid;
+    listPanel.hidden = true;
+    mainContainer.hidden = false;
     resultEl.hidden = false;
     renderCurrent();
-    if (btnAll) { btnAll.hidden = false; btnAll.textContent = '下载全部 P（' + pages.length + ' 个视频）'; }
+    setStatus('ok', '已从列表打开：' + current.title);
     probeAcceptQuality().then(fillQnOptions);
+    // 显示返回列表按钮
+    ensureDetailBackBtn();
+  }
+  function ensureDetailBackBtn() {
+    if (!listBack) return;
+    if (!document.getElementById('detail-back-btn')) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.id = 'detail-back-btn';
+      b.className = 'mini-btn list-detail-back';
+      b.textContent = '← 返回列表';
+      b.addEventListener('click', function () {
+        if (listState) {
+          listPanel.hidden = false;
+          mainContainer.hidden = true;
+          if (resultEl) resultEl.hidden = true;
+          renderListTable();
+          updateListDlBtn();
+        }
+      });
+      var wrap = $('opt-actions');
+      if (wrap) wrap.appendChild(b);
+    }
+  }
+  // 勾选一键下载：每个勾选视频以「单个视频下载」方式加入下载队列（并发由调度器控制）
+  function downloadSelectedListItems() {
+    if (!listState) return;
+    var items = listState.items.filter(function (it) { return listState.checked[it.bvid]; });
+    if (!items.length) { showToast('请先勾选要下载的视频', 'warn'); return; }
+    var segBtn = listTypeSeg ? listTypeSeg.querySelector('.seg-btn.active') : null;
+    var type = segBtn ? segBtn.dataset.type : 'video';
+    // 快照当前全局下载偏好（主界面设置）
+    var pref = {
+      qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto',
+      format: fmtSelect ? fmtSelect.value : 'mp4', af: afSelect.value, aq: Number(aqSelect.value),
+      clip: '', danmaku: false, subtitle: false
+    };
+    var n = items.length;
+    items.forEach(function (it, idx) {
+      var snap = {
+        kind: 'video', bvid: it.bvid, aid: it.aid, cid: it.cid, title: it.title,
+        pic: it.pic, up: '', duration: it.duration, stat: it.stat, pubdate: 0,
+        pages: [{ cid: it.cid, page: 1, part: it.title, duration: it.duration }],
+        pageIndex: 0, degraded: false, _listItem: true
+      };
+      // 复用主界面 current 以走 createTask（从快照恢复）
+      var saved = current;
+      current = snap;
+      var t = createTask(safeName(it.title) + (type === 'video' ? '（视频）' : '（音频）'), type === 'video' ? '视频' : '音频');
+      t.type = type;
+      t.settings = Object.assign({}, pref);
+      t.settings.clip = '';
+      t.settings.danmaku = false;
+      t.settings.subtitle = false;
+      current = saved;
+      queueTask(t, function () {
+        if (type === 'video') downloadVideo(t); else downloadAudio(t);
+      });
+    });
+    showToast('已加入 ' + n + ' 个下载任务（并发上限 ' + maxConcurrent + '，其余自动排队等待）', 'ok');
+    // 主任务卡片可见
+    tasksCard.hidden = false;
   }
 
   /* ---------- 清晰度档位（原视频无该分辨率 → 灰显禁用） ---------- */
@@ -1528,6 +1664,56 @@
   }
 
   /* ---------- 多任务管理器 ---------- */
+  /* ---------- v1.4：并发调度器（同时下载数上限，其余排队等待） ---------- */
+  function queueTask(t, run) {
+    t._run = run;
+    if (runningCount < maxConcurrent) {
+      t._running = true;
+      runningCount++;
+      setTaskStatus(t, 'running', '下载中…');
+      try { run(); } catch (e) { handleTaskError(t, e); }
+    } else {
+      t._running = false;
+      setTaskStatus(t, 'queued', '等待中（排队第 ' + (taskQueue.length + 1) + ' 位）');
+      setTaskNote(t, 'warn', '已达到同时下载数上限（' + maxConcurrent + '），自动排队等待');
+      taskQueue.push(t);
+    }
+  }
+  function pumpQueue() {
+    while (runningCount < maxConcurrent && taskQueue.length) {
+      var t = taskQueue.shift();
+      if (t.cancelled) continue;   // 已被取消的任务不占槽位
+      t._running = true;
+      runningCount++;
+      setTaskStatus(t, 'running', '下载中…');
+      setTaskNote(t, '', '');
+      try { if (t._run) t._run(); } catch (e) { handleTaskError(t, e); }
+    }
+  }
+  function onTaskFinished(t) {
+    var qi = taskQueue.indexOf(t);
+    if (qi >= 0) taskQueue.splice(qi, 1);
+    if (t._running) { t._running = false; if (runningCount > 0) runningCount--; }
+    pumpQueue();
+  }
+  function cancelAllTasks() {
+    var count = 0;
+    tasks.forEach(function (t) {
+      if (['done', 'error', 'cancelled'].indexOf(t.status) >= 0) return;
+      count++;
+      t.cancelled = true;
+      if (t.timer) clearTimeout(t.timer);
+      if (t.cancelFn) { try { t.cancelFn(); } catch (e) { } }
+      setTaskStatus(t, 'cancelled', '已取消');
+      setTaskNote(t, 'warn', '任务已取消');
+    });
+    var alive = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
+    if (tasksCancelAll) tasksCancelAll.hidden = alive.length === 0;
+    if (batchCancelAll) batchCancelAll.hidden = alive.length === 0;
+    if (listCancelAll) listCancelAll.hidden = alive.length === 0;
+    showToast(count ? ('已取消 ' + count + ' 个下载任务') : '当前没有进行中的下载任务', count ? 'warn' : 'ok');
+  }
+
   function createTask(name, badge) {
     taskSeq++;
     var t = {
@@ -1634,10 +1820,17 @@
     updateTaskControls(t);
     t.statusEl.textContent = text || status;
     t.statusEl.className = 'task-status' +
-      (status === 'done' ? ' done' : status === 'error' ? ' error' : status === 'cancelled' ? ' cancelled' : '');
+      (status === 'done' ? ' done' : status === 'error' ? ' error' : status === 'cancelled' ? ' cancelled' : status === 'queued' ? ' queued' : '');
     if (status === 'done' || status === 'error' || status === 'cancelled') {
       // 本次使用期间保留任务记录；有保存路径时展示文件操作键
       if (t.path) bindTaskActions(t);
+      // v1.4：终态后释放并发槽位，自动补位下一个排队任务
+      if (!t._ended) { t._ended = true; onTaskFinished(t); }
+      // 隐藏无需再显示的中断按钮（若已无活跃任务）
+      var alive = tasks.filter(function (x) { return ['done', 'error', 'cancelled'].indexOf(x.status) < 0; });
+      if (tasksCancelAll) tasksCancelAll.hidden = alive.length === 0;
+      if (batchCancelAll) batchCancelAll.hidden = alive.length === 0;
+      if (listCancelAll) listCancelAll.hidden = alive.length === 0;
     }
   }
   function setTaskProgress(t, frac, text, speed) {
@@ -1676,8 +1869,10 @@
     }
     t.type = type;
     var run = function () {
-      if (type === 'video') downloadVideo(t);
-      else downloadAudio(t);
+      queueTask(t, function () {
+        if (type === 'video') downloadVideo(t);
+        else downloadAudio(t);
+      });
     };
     // 定时开始（功能9）
     if (timerCheck && timerCheck.checked && timerInput && timerInput.value) {
@@ -1770,10 +1965,12 @@
       if (d.aid) src.aid = d.aid;
     });
     return ensure.catch(function (e) {
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
       setTaskStatus(task, 'error', '获取视频信息失败');
       setTaskNote(task, 'fail', e && e.message ? e.message : '未知错误');
       throw e;
     }).then(function () {
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); return; }
       // 先等待高清能力探测完成，避免探测前的点击误走直链降级
       return waitMuxReady().then(function () { return downloadVideoInner(task); });
     });
@@ -2012,10 +2209,12 @@
       if (d.aid) src.aid = d.aid;
     });
     return ensure.catch(function (e) {
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
       setTaskStatus(task, 'error', '获取视频信息失败');
       setTaskNote(task, 'fail', e && e.message ? e.message : '未知错误');
       throw e;
     }).then(function () {
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); return; }
       return downloadAudioInner(task);
     });
   }
@@ -2634,7 +2833,7 @@
       name.title = label;
       var st = document.createElement('div');
       st.className = 'batch-item-state ' + (states[i] ? states[i].status : 'queued');
-      var map = { queued: '待下载', running: '下载中…', done: '✅ 完成', error: '❌ 失败', cancelled: '已取消' };
+      var map = { queued: '等待中', running: '下载中…', done: '✅ 完成', error: '❌ 失败', cancelled: '已取消' };
       var key = (states[i] && states[i].status) || 'queued';
       st.textContent = map[key] || key;
       st.title = (states[i] && states[i].note) || '';
@@ -2688,6 +2887,11 @@
           states[rowIdx] = { status: t.status };
           renderBatchList(states);
           cb();
+        } else {
+          // 排队等待中实时显示
+          var cur = states[rowIdx] ? states[rowIdx].status : '';
+          if (t.status === 'queued' && cur !== 'queued') { states[rowIdx] = { status: 'queued', note: '等待中（并发上限 ' + maxConcurrent + '）' }; renderBatchList(states); }
+          else if (t.status === 'running' && cur === 'queued') { states[rowIdx] = { status: 'running' }; renderBatchList(states); }
         }
       }, 300);
     };
@@ -2732,7 +2936,7 @@
         states[rowIdx] = { status: 'running' };
         renderBatchList(states);
         try {
-          runTaskByType(t);
+          queueTask(t, function () { runTaskByType(t); });
         } catch (e2) {
           setTaskStatus(t, 'error', '启动失败');
           setTaskNote(t, 'fail', e2 && e2.message ? e2.message : '未知错误');
@@ -2752,6 +2956,87 @@
   if (batchBack) batchBack.addEventListener('click', function () {
     if (batchActive) { showToast('批量下载仍在进行，返回后任务会继续在下载任务列表显示', 'warn'); }
     closeBatchPanel();
+  });
+  if (batchCancelAll) batchCancelAll.addEventListener('click', cancelAllTasks);
+
+  /* ---------- v1.4：合集/收藏夹列表面板 ---------- */
+  if (listBack) listBack.addEventListener('click', function () {
+    // 从单视频详情返回列表，或从列表返回主菜单
+    listPanel.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    mainContainer.hidden = false;
+    listState = null;
+    setFinderState('idle');
+    setStatus('', '');
+    tasksCard.hidden = tasks.length === 0;
+  });
+  if (listCheckAll) listCheckAll.addEventListener('click', function () {
+    if (!listState) return;
+    listState.items.forEach(function (it) { listState.checked[it.bvid] = true; });
+    renderListTable(); updateListDlBtn();
+  });
+  if (listUncheckAll) listUncheckAll.addEventListener('click', function () {
+    if (!listState) return;
+    listState.checked = {};
+    renderListTable(); updateListDlBtn();
+  });
+  if (listDlSelected) listDlSelected.addEventListener('click', downloadSelectedListItems);
+  if (listTypeSeg) listTypeSeg.addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('.seg-btn') : null;
+    if (!btn) return;
+    listTypeSeg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.toggle('active', b === btn); });
+  });
+  if (listCancelAll) listCancelAll.addEventListener('click', cancelAllTasks);
+
+  /* ---------- v1.4：返回主菜单（保留本次下载历史） ---------- */
+  function goHome() {
+    if (listPanel) listPanel.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (historyPanel) historyPanel.hidden = true;
+    if (settingsPanel) settingsPanel.hidden = true;
+    if (settingsMask) settingsMask.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    if (mainContainer) mainContainer.hidden = false;
+    listState = null;
+    current = null;
+    inputEl.value = '';
+    if (clearBtn) clearBtn.hidden = true;
+    setFinderState('idle');
+    setStatus('', '');
+    tasksCard.hidden = tasks.length === 0;
+    showToast('已返回主菜单（本次下载历史已保留）', 'ok');
+  }
+  if (homeBtn) homeBtn.addEventListener('click', goHome);
+
+  /* ---------- v1.4：一键中断/取消所有 ---------- */
+  if (tasksCancelAll) tasksCancelAll.addEventListener('click', cancelAllTasks);
+  // 初始：无活跃任务时隐藏中断按钮
+  (function () {
+    var alive0 = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
+    if (tasksCancelAll) tasksCancelAll.hidden = alive0.length === 0;
+    if (batchCancelAll) batchCancelAll.hidden = alive0.length === 0;
+    if (listCancelAll) listCancelAll.hidden = alive0.length === 0;
+  })();
+
+  /* ---------- v1.4：同时下载数上限（设置） ---------- */
+  function applyMaxConcurrent(v) {
+    maxConcurrent = Math.max(1, Math.min(16, Number(v) || 8));
+    if (maxConcurrentSelect) maxConcurrentSelect.value = String(maxConcurrent);
+    if (concNote) {
+      var mem = (typeof navigator !== 'undefined' && navigator.deviceMemory) ? navigator.deviceMemory : 0;
+      var suggest = mem >= 16 ? 12 : mem >= 8 ? 8 : mem >= 4 ? 4 : 2;
+      concNote.textContent = '当前上限 ' + maxConcurrent + '：同时最多进行 ' + maxConcurrent + ' 项下载，其余自动排队等待，避免内存溢出。' +
+        (mem ? '（检测到内存约 ' + mem + ' GB，建议上限 ≤' + suggest + '）' : '');
+    }
+  }
+  try {
+    var savedConc = Number(localStorage.getItem('bili_max_concurrent') || 8);
+    applyMaxConcurrent(savedConc);
+  } catch (e) { applyMaxConcurrent(8); }
+  if (maxConcurrentSelect) maxConcurrentSelect.addEventListener('change', function () {
+    applyMaxConcurrent(maxConcurrentSelect.value);
+    try { localStorage.setItem('bili_max_concurrent', String(maxConcurrent)); } catch (e) { }
+    showToast('同时下载数上限已设为 ' + maxConcurrent, 'ok');
   });
   // 批量面板：类型切换显示对应选项
   if (batchTypeSeg) {

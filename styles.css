@@ -879,3 +879,46 @@ body {
 .batch-item-state.running { color: #1565c0; }
 .mini-btn.primary { background: var(--accent, #fb7299); border-color: var(--accent, #fb7299); color: #fff; }
 .mini-btn.primary:disabled { opacity: .55; cursor: wait; }
+
+/* ---------- v1.4：合集/收藏夹视频表格列表 ---------- */
+.list-panel {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--bg, #f5f6fa);
+  display: flex; flex-direction: column;
+  padding: 18px 22px; box-sizing: border-box;
+}
+.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.list-head h2 { margin: 0; font-size: 18px; }
+.list-head-actions { display: flex; gap: 8px; align-items: center; }
+.list-sub { color: var(--muted, #888); font-size: 12px; margin-bottom: 10px; }
+.list-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.list-toolbar-spacer { flex: 1; }
+.list-table-wrap { flex: 1; overflow-y: auto; background: var(--card-bg, #fff); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
+.list-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.list-table th { position: sticky; top: 0; background: var(--card-bg, #fff); text-align: left; padding: 10px 10px; font-size: 12px; color: var(--muted, #888); border-bottom: 1px solid var(--border, #e3e6ee); z-index: 1; }
+.list-table td { padding: 8px 10px; border-bottom: 1px solid var(--border, #f0f1f5); vertical-align: middle; font-size: 13px; }
+.list-table tbody tr { cursor: pointer; }
+.list-table tbody tr:hover { background: var(--hover, #f6f8ff); }
+.list-table tbody tr.row-checked { background: var(--checked, #eef3ff); }
+.col-check { width: 44px; text-align: center; }
+.col-cover { width: 92px; }
+.col-title { width: auto; }
+.col-play { width: 92px; }
+.col-danmaku { width: 78px; }
+.col-dur { width: 70px; text-align: right; }
+.list-table input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.list-cover { width: 82px; height: 48px; object-fit: cover; border-radius: 6px; background: #eee; display: block; }
+.list-title-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-empty { padding: 30px; text-align: center; color: var(--muted, #888); }
+.list-detail-back { margin-left: 10px; }
+
+/* 主菜单按钮 */
+.home-btn { background: transparent; border: 1px solid var(--border, #e3e6ee); color: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer; margin-right: 8px; }
+.home-btn:hover { background: var(--hover, #f0f2f7); }
+
+/* 危险按钮 */
+.mini-btn.danger { background: #fdecea; color: #d93026; border-color: #f5b8b2; }
+.mini-btn.danger:hover { background: #fbd9d5; }
+
+/* 任务排队状态 */
+.task-status.queued { color: #b8860b; }

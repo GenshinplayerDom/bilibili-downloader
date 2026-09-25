@@ -19,6 +19,7 @@
     <p>粘贴 B 站链接，一键下载视频 / 音频</p>
   </div>
   <div class="header-right">
+    <button type="button" class="home-btn" id="home-btn" title="返回主菜单（保留本次下载历史）">🏠 主菜单</button>
     <span class="login-badge" id="login-badge">未登录</span>
     <span class="mini-status" id="mini-status" title="代理状态">
       <i class="proxy-dot" id="proxy-dot"></i><span id="proxy-state">检测中…</span>
@@ -52,7 +53,7 @@
       <div class="video-meta">
         <div class="v-title" id="v-title"></div>
         <div class="v-up" id="v-up"></div>
-        <div class="v-stats lite-hide">
+        <div class="v-stats">
           <span>▶ <b id="v-views">0</b> 播放</span>
           <span>💬 <b id="v-danmaku">0</b> 弹幕</span>
           <span>👍 <b id="v-likes">0</b> 点赞</span>
@@ -157,6 +158,7 @@
   <!-- 下载任务（支持同时下载多个视频 / 音频，本次使用期间保留记录） -->
   <section class="card tasks-card" id="tasks-card" hidden>
     <div class="tasks-title">下载任务 <span class="tasks-sub">本次使用期间保留</span>
+      <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
       <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
     </div>
     <div class="tasks-list" id="tasks-list"></div>
@@ -189,6 +191,7 @@
   <div class="batch-head">
     <h2>批量下载</h2>
     <div class="batch-head-actions">
+      <button type="button" class="mini-btn danger" id="batch-cancel-all" title="一键中断 / 取消所有下载任务">中断 / 取消全部</button>
       <button type="button" class="mini-btn primary" id="batch-start" title="按下方选项顺序下载全部任务">开始批量下载</button>
       <button type="button" class="icon-btn" id="batch-back" title="返回">←</button>
     </div>
@@ -251,6 +254,44 @@
     </div>
   </div>
   <div class="batch-list" id="batch-list"></div>
+</section>
+
+<!-- 合集 / 收藏夹视频列表（表格勾选下载，替换主界面） -->
+<section class="list-panel" id="list-panel" hidden>
+  <div class="list-head">
+    <h2 id="list-title">视频列表</h2>
+    <div class="list-head-actions">
+      <button type="button" class="mini-btn danger" id="list-cancel-all" title="一键中断 / 取消所有下载任务">中断 / 取消全部</button>
+      <button type="button" class="icon-btn" id="list-back" title="返回上一级">←</button>
+    </div>
+  </div>
+  <div class="list-sub" id="list-sub"></div>
+  <div class="list-toolbar">
+    <div class="type-seg" id="list-type-seg" role="tablist">
+      <button type="button" class="seg-btn active" data-type="video" aria-selected="true">视频</button>
+      <button type="button" class="seg-btn" data-type="audio" aria-selected="false">音频</button>
+    </div>
+    <span class="list-toolbar-spacer"></span>
+    <button type="button" class="mini-btn" id="list-check-all">全选</button>
+    <button type="button" class="mini-btn" id="list-uncheck-all">全不选</button>
+    <button type="button" class="mini-btn primary" id="list-dl-selected" disabled>一键下载勾选（0）</button>
+  </div>
+  <div class="list-table-wrap">
+    <table class="list-table" id="list-table">
+      <thead>
+        <tr>
+          <th class="col-check"></th>
+          <th class="col-cover"></th>
+          <th class="col-title">标题</th>
+          <th class="col-play">播放量</th>
+          <th class="col-danmaku">弹幕</th>
+          <th class="col-dur">时长</th>
+        </tr>
+      </thead>
+      <tbody id="list-tbody"></tbody>
+    </table>
+  </div>
+  <div class="list-empty" id="list-empty" hidden>暂无可下载的视频</div>
 </section>
 
 <!-- 左侧竖向设置侧边栏 -->
@@ -324,6 +365,21 @@
       <div class="set-row">
         <label class="checkbox-label"><input type="checkbox" id="cache-lock"> 锁定下载地址缓存（永不过期）</label>
       </div>
+      <div class="set-row">
+        <span class="set-label">同时下载数上限</span>
+        <select id="max-concurrent" style="width:130px">
+          <option value="1">1（最保守）</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4（小内存推荐）</option>
+          <option value="6">6</option>
+          <option value="8" selected>8（默认 · 推荐）</option>
+          <option value="10">10</option>
+          <option value="12">12（大内存）</option>
+          <option value="16">16（超大内存）</option>
+        </select>
+      </div>
+      <div class="set-note" id="conc-note">同时最多进行 N 项下载，其余任务自动排队等待，避免内存溢出。</div>
       <div class="set-row">
         <span class="set-label">界面语言</span>
         <select id="lang-select" style="width:130px">
