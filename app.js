@@ -923,9 +923,25 @@
           var reader = res.body.getReader();
           var bufs = [];
           var got = 0;
+          // idle 停滞检测：分片传输中途长时间无数据（TCP 心跳保持连接但数据中断）时中止并触发重试
+          var idleTimer = null;
+          var idleSince = Date.now();
+          function startIdleWatch() {
+            idleSince = Date.now();
+            if (idleTimer) clearInterval(idleTimer);
+            idleTimer = setInterval(function () {
+              if (Date.now() - idleSince > 20000) {
+                if (idleTimer) clearInterval(idleTimer);
+                try { reader.cancel(); } catch (e) { }
+              }
+            }, 5000);
+          }
+          function stopIdleWatch() { if (idleTimer) { clearInterval(idleTimer); idleTimer = null; } }
           function pump() {
-            if (check && check()) { try { reader.cancel(); } catch (e) { } return Promise.reject(new Error('已取消')); }
+            if (check && check()) { stopIdleWatch(); try { reader.cancel(); } catch (e) { } return Promise.reject(new Error('已取消')); }
+            startIdleWatch();
             return reader.read().then(function (r) {
+              stopIdleWatch();
               if (r.done) {
                 var all = new Uint8Array(got);
                 var off = 0;
