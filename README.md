@@ -1,8 +1,8 @@
-# 哔哩下载器 · Dom
+# 哔哩下载器 · GenshinplayerDom
 
 B 站视频 / 音频下载器 —— 支持 Windows 客户端与 Android 端，内置本地代理、多线程分段加速、高清 DASH 音视频无损合并、账号登录解锁高清晰度。**当前版本 v1.2.0**。
 
-> 本项目基于 **MIT License** 开源。请保留署名「Dom」，并遵循协议条款。
+> 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 
 ---
 
@@ -97,12 +97,12 @@ export ANDROID_HOME=/path/to/android-sdk
 
 ## ⚖️ License
 
-[MIT](LICENSE) © Dom
+[MIT](LICENSE) © GenshinplayerDom
 
 ```
 MIT License
 
-Copyright (c) 2026 Dom
+Copyright (c) 2026 GenshinplayerDom
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

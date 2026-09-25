@@ -839,7 +839,7 @@ function createWindow() {
     minWidth: 640,
     minHeight: 640,
     autoHideMenuBar: true,
-    title: '哔哩下载器 · Dom',
+    title: '哔哩下载器 · GenshinplayerDom',
     backgroundColor: '#f4f6f9',
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {

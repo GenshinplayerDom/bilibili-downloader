@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         哔哩下载器 · Dom（油猴版）
+// @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
 // @version      1.2.0
-// @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by Dom
-// @author       Dom
+// @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
+// @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
 // @match        https://www.bilibili.com/bangumi/play/*
 // @match        https://www.bilibili.com/list/*
@@ -112,7 +112,7 @@
   var box = document.createElement('div');
   box.style.cssText = 'position:fixed;right:14px;top:80px;z-index:99999;width:230px;background:#fff;border:1px solid #e3e5e7;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);padding:12px;font:13px/1.5 system-ui,sans-serif;color:#1f2329';
   box.innerHTML =
-    '<div style="font-weight:700;margin-bottom:8px;color:#fb7299">哔哩下载器 · Dom</div>' +
+    '<div style="font-weight:700;margin-bottom:8px;color:#fb7299">哔哩下载器 · GenshinplayerDom</div>' +
     '<select id="bd-qn" style="width:100%;padding:5px;margin-bottom:6px;border:1px solid #e3e5e7;border-radius:6px"></select>' +
     '<div style="display:flex;gap:6px;margin-bottom:6px">' +
     '<button id="bd-v" style="flex:1;padding:6px;background:#fb7299;color:#fff;border:none;border-radius:6px;cursor:pointer">下载视频</button>' +

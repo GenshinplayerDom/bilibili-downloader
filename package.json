@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "description": "哔哩下载器 · 客户端一体化版（内置代理）",
   "main": "main.js",
-  "author": "Dom",
+  "author": "GenshinplayerDom",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
