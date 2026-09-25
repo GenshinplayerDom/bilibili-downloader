@@ -24,6 +24,9 @@ var crypto = require('crypto');
 var urlMod = require('url');
 var pathMod = require('path');
 var fsMod = require('fs');
+var security = require('./lib/security');
+var accessToken = crypto.randomBytes(32).toString('hex');
+var onCookiesChanged = null;
 
 var PORT = parseInt(process.env.PORT, 10) || 8123;
 var HOST = '127.0.0.1';
@@ -45,35 +48,22 @@ var userDataDir = null;
 
 function setUserDataDir(dir) {
   userDataDir = dir;
-  loadUserCookies();
 }
 
 function loadUserCookies() {
-  try {
-    if (!userDataDir) return;
-    var f = pathMod.join(userDataDir, 'bili_cookies.json');
-    if (fsMod.existsSync(f)) {
-      var j = JSON.parse(fsMod.readFileSync(f, 'utf8'));
-      if (j && j.cookies) userCookies = j.cookies;
-      console.log('[哔哩下载器] 已加载登录账号 Cookie（' + Object.keys(userCookies).length + ' 项）');
-    }
-  } catch (e) {
-    console.error('[哔哩下载器] 加载登录 Cookie 失败：', e.message);
-  }
+  // Persistence belongs to Electron's encrypted CookieStore.
 }
 
 function saveUserCookies() {
-  try {
-    if (!userDataDir) return;
-    var f = pathMod.join(userDataDir, 'bili_cookies.json');
-    fsMod.writeFileSync(f, JSON.stringify({ cookies: userCookies, savedAt: Date.now() }, null, 2), 'utf8');
-  } catch (e) {
-    console.error('[哔哩下载器] 保存登录 Cookie 失败：', e.message);
-  }
+  if (onCookiesChanged) onCookiesChanged(userCookies);
 }
 
 function setUserCookies(cookies) {
-  userCookies = cookies || {};
+  userCookies = {};
+  Object.keys(cookies || {}).forEach(function (key) {
+    var value = cookies[key];
+    if (/^[A-Za-z0-9_]+$/.test(key) && typeof value === 'string' && value.length < 8192 && !/[\r\n;]/.test(value)) userCookies[key] = value;
+  });
   // 登录窗口的浏览器身份（buvid3/buvid4 等）与 SESSDATA 同属一个会话；
   // 覆盖代理匿名身份，避免"登录 Cookie + 陌生匿名身份"被 B 站判定为异常
   // 组合而只放行低清晰度。
@@ -125,6 +115,7 @@ var httpsAgent = new https.Agent({
 
 function httpsGet(url, headers) {
   return new Promise(function (resolve, reject) {
+    security.validateUrl(url, 'media');
     var u = urlMod.parse(url);
     var req = https.request({
       hostname: u.hostname,
@@ -137,12 +128,14 @@ function httpsGet(url, headers) {
       resolve(res);
     });
     req.on('error', reject);
+    req.setTimeout(30000, function () { req.destroy(new Error('上游请求超时')); });
     req.end();
   });
 }
 
 function httpsPost(url, headers, body) {
   return new Promise(function (resolve, reject) {
+    security.validateUrl(url, 'api');
     var u = urlMod.parse(url);
     var req = https.request({
       hostname: u.hostname,
@@ -155,6 +148,7 @@ function httpsPost(url, headers, body) {
       resolve(res);
     });
     req.on('error', reject);
+    req.setTimeout(30000, function () { req.destroy(new Error('上游请求超时')); });
     req.end(body || '');
   });
 }
@@ -186,7 +180,7 @@ var lastGate = 0;
 function biliGate(fn) {
   var run = gateChain.then(function () {
     var wait = Math.max(0, 250 - (Date.now() - lastGate));
-    if (wait > 0) return sleep(wait).then(fn);
+    if (wait > 0) return sleep(wait).then(function () { lastGate = Date.now(); return fn(); });
     lastGate = Date.now();
     return fn();
   });
@@ -282,7 +276,7 @@ function wbiSignUrl(url) {
   var u = urlMod.parse(url, true);
   if (!/^\/x\//.test(u.pathname) || u.query.w_rid || !identity.wbiKey) return url;
   u.query.wts = Math.floor(Date.now() / 1000);
-  var q = Object.keys(u.query).sort().map(function (k) { return k + '=' + encodeURIComponent(u.query[k]); }).join('&');
+  var q = Object.keys(u.query).sort().map(function (k) { return k + '=' + encodeURIComponent(String(u.query[k]).replace(/[!'()*]/g, '')); }).join('&');
   u.query.w_rid = crypto.createHash('md5').update(q + wbiMixinKey(identity.wbiKey)).digest('hex');
   u.search = urlMod.format(u.query);
   return urlMod.format(u);
@@ -290,6 +284,7 @@ function wbiSignUrl(url) {
 
 /* ---------- 转发 B 站 API（带身份 + WBI 签名 + 412 自动换身份重试） ---------- */
 function biliGet(url) {
+  url = security.validateUrl(url, 'api').href;
   url = wbiSignUrl(url);
   return httpsGet(url, {
     'User-Agent': UA,
@@ -323,9 +318,15 @@ function apiForward(url) {
 /* ---------- 短链展开 ---------- */
 function expandUrl(url, depth) {
   if (depth > 6) return Promise.resolve(url);
-  return httpsGet(url, { 'User-Agent': UA }).then(function (res) {
+  url = security.validateUrl(url, 'expand').href;
+  return new Promise(function (resolve, reject) {
+    var request = https.get(url, { headers: { 'User-Agent': UA } }, resolve);
+    request.on('error', reject);
+    request.setTimeout(15000, function () { request.destroy(new Error('短链请求超时')); });
+  }).then(function (res) {
     if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
       var loc = res.headers.location;
+      res.resume();
       if (/^https?:\/\//i.test(loc)) return expandUrl(loc, depth + 1);
       var base = urlMod.parse(url);
       return expandUrl(base.protocol + '//' + base.host + loc, depth + 1);
@@ -336,10 +337,9 @@ function expandUrl(url, depth) {
 
 /* ---------- HTTP 服务 ---------- */
 function setCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, X-Bili-Token');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type, X-Bili-Retry');
 }
 
@@ -357,6 +357,11 @@ var LISTEN_HOSTS = ['127.0.0.1', '127.0.0.2', '127.0.0.3'];
 
 function handleRequest(req, res) {
   setCors(res);
+  var origin = req.headers.origin;
+  var hostAllowed = /^127\.0\.0\.[123](?::\d+)?$|^localhost(?::\d+)?$/.test(req.headers.host || '');
+  var originAllowed = !origin || origin === 'null' || /^http:\/\/(127\.0\.0\.[123]|localhost):\d+$/.test(origin);
+  if (!hostAllowed || !originAllowed) return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
+  if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.end();
@@ -364,6 +369,28 @@ function handleRequest(req, res) {
   }
   var u = urlMod.parse(req.url, true);
   var q = u.query;
+
+  // Serve the browser UI from loopback. Its token is never available cross-origin.
+  var assets = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/lame.min.js': 'lame.min.js', '/icon.ico': 'icon.ico' };
+  if (req.method === 'GET' && assets[u.pathname]) {
+    if (req.headers['sec-fetch-site'] === 'cross-site') return sendJson(res, 403, { ok: false, error: '请直接打开本地页面' });
+    var filename = assets[u.pathname];
+    var data = fsMod.readFileSync(pathMod.join(__dirname, filename));
+    if (filename === 'index.html') data = Buffer.from(data.toString('utf8').replace('<head>', '<head><meta name="bili-proxy-token" content="' + accessToken + '">'));
+    var types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.ico': 'image/x-icon' };
+    res.setHeader('Content-Type', types[pathMod.extname(filename)]);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.end(data); return;
+  }
+  var supplied = Buffer.from(String(req.headers['x-bili-token'] || ''));
+  var expected = Buffer.from(accessToken);
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return sendJson(res, 401, { ok: false, error: '代理认证失败，请使用客户端或本地代理主页' });
+  if (q.url) {
+    try { q.url = security.validateUrl(q.url, u.pathname === '/api' ? 'api' : u.pathname === '/expand' ? 'expand' : 'media').href; }
+    catch (error) { return sendJson(res, 400, { ok: false, error: error.message }); }
+  }
 
   /* ---- /status ---- */
   if (u.pathname === '/status') {
@@ -388,7 +415,7 @@ function handleRequest(req, res) {
   if (u.pathname === '/login-cookies') {
     if (req.method === 'POST') {
       var body = '';
-      req.on('data', function (ch) { body += ch; });
+      req.on('data', function (ch) { body += ch; if (Buffer.byteLength(body) > 65536) req.destroy(); });
       req.on('end', function () {
         try {
           var j = JSON.parse(body || '{}');
@@ -478,6 +505,8 @@ function handleRequest(req, res) {
         if (up.headers[h]) res.setHeader(h, up.headers[h]);
       });
       up.pipe(res);
+      up.on('error', function () { res.destroy(); });
+      res.on('close', function () { up.destroy(); });
     }).catch(function (e) {
       res.statusCode = 502;
       res.end('stream proxy failed: ' + (e && e.message ? e.message : 'unknown'));
@@ -494,7 +523,7 @@ var servers = [];
 
 function start(port) {
   port = port || PORT;
-  return Promise.all(LISTEN_HOSTS.map(function (host) {
+  return Promise.allSettled(LISTEN_HOSTS.map(function (host) {
     return new Promise(function (resolve, reject) {
       var s = http.createServer(handleRequest);
       s.once('error', function (e) {
@@ -510,21 +539,27 @@ function start(port) {
         resolve(s);
       });
     });
-  })).then(function (list) {
+  })).then(function (results) {
+    var failed = results.find(function (result) { return result.status === 'rejected'; });
+    if (failed) throw failed.reason;
+    var list = results.map(function (result) { return result.value; });
     console.log('哔哩下载器内置代理已启动（' + LISTEN_HOSTS.join(' / ') + ':' + port + '）');
     return list;
-  });
+  }).catch(function (error) { return stop().then(function () { throw error; }); });
 }
 
 function stop() {
   return Promise.all(servers.map(function (s) {
     return new Promise(function (resolve) {
-      try { s.close(function () { resolve(); }); } catch (e) { resolve(); }
+      try { s.close(function () { resolve(); }); if (s.closeAllConnections) s.closeAllConnections(); } catch (e) { resolve(); }
     });
   })).then(function () { servers = []; });
 }
 
 module.exports = {
+  getAccessToken: function () { return accessToken; },
+  onCookiesChanged: function (callback) { onCookiesChanged = callback; },
+  handleRequest: handleRequest,
   start: start,
   stop: stop,
   LISTEN_HOSTS: LISTEN_HOSTS,

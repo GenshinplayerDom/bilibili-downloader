@@ -46,23 +46,26 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private final BiliProxy proxy = new BiliProxy();
+    private CookieVault cookieVault;
+    private static final String APP_ORIGIN = "https://appassets.androidplatform.net";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        cookieVault = new CookieVault(this);
         webView = new WebView(this);
         setContentView(webView);
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setAllowFileAccess(true);
-        s.setAllowContentAccess(true);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
         // 本地 file 页面允许发起网络请求到本机代理（127.0.0.1:8123），避免 CORS/同源限制
-        s.setAllowFileAccessFromFileURLs(true);
-        s.setAllowUniversalAccessFromFileURLs(true);
+        s.setAllowFileAccessFromFileURLs(false);
+        s.setAllowUniversalAccessFromFileURLs(false);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
         s.setUserAgentString(s.getUserAgentString() + " BiliDownloader/1.1.4");
 
@@ -82,6 +85,10 @@ public class MainActivity extends Activity {
         });
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return !request.getUrl().toString().equals(APP_ORIGIN + "/index.html");
+            }
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 try {
@@ -115,7 +122,7 @@ public class MainActivity extends Activity {
 
         // 恢复上次登录 Cookie
         try {
-            String saved = getSharedPreferences("bili", MODE_PRIVATE).getString("cookies", "");
+            String saved = cookieVault.load();
             if (!saved.isEmpty()) {
                 Map<String, String> ck = new LinkedHashMap<>();
                 for (String seg : saved.split(";")) {
@@ -132,18 +139,22 @@ public class MainActivity extends Activity {
         }).start();
 
         // 使用 file:// 加载本地页面（兼容性最佳；已放开 file 页面网络访问）
-        webView.loadUrl("file:///android_asset/index.html");
+        webView.loadUrl(APP_ORIGIN + "/index.html");
     }
 
     /* ---------- 代理拦截 ---------- */
     private WebResourceResponse intercept(String url, String method, Map<String, String> headers, byte[] body) {
-        // 只拦截本机代理地址 127.0.0.x:8123
-        if (!url.startsWith("http://127.0.0.") && !url.startsWith("http://localhost:")) return null;
-        String p = url.substring(url.indexOf("//") + 2);
-        int slash = p.indexOf('/');
-        String hostPort = slash < 0 ? p : p.substring(0, slash);
-        String pathQuery = slash < 0 ? "/" : p.substring(slash);
-        if (!hostPort.endsWith(":8123")) return null;
+        if (!url.startsWith(APP_ORIGIN + "/")) return null;
+        String pathQuery = url.substring(APP_ORIGIN.length());
+        if (!pathQuery.startsWith("/proxy/")) {
+            String asset = pathQuery.substring(1);
+            if (!java.util.Arrays.asList("index.html", "app.js", "styles.css", "lame.min.js").contains(asset)) return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+            try {
+                String mime = asset.endsWith(".js") ? "text/javascript" : asset.endsWith(".css") ? "text/css" : "text/html";
+                return new WebResourceResponse(mime, "UTF-8", getAssets().open(asset));
+            } catch (IOException error) { return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0])); }
+        }
+        pathQuery = pathQuery.substring("/proxy".length());
         int q = pathQuery.indexOf('?');
         String path = q < 0 ? pathQuery : pathQuery.substring(0, q);
         String query = q < 0 ? null : pathQuery.substring(q + 1);
@@ -152,7 +163,7 @@ public class MainActivity extends Activity {
         Map<String, String> outHeaders = new LinkedHashMap<>(r.headers);
         if (!r.isStream) {
             // 普通 JSON 响应（加 CORS 头，页面 fetch 127.0.0.1 跨源可读）
-            outHeaders.put("Access-Control-Allow-Origin", "*");
+            outHeaders.put("Access-Control-Allow-Origin", APP_ORIGIN);
             outHeaders.put("Access-Control-Allow-Private-Network", "true");
             outHeaders.put("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             outHeaders.put("Access-Control-Allow-Headers", "Range, Content-Type");
@@ -228,15 +239,14 @@ public class MainActivity extends Activity {
                     if (sb.length() > 0) sb.append(';');
                     sb.append(e.getKey()).append('=').append(e.getValue());
                 }
-                getSharedPreferences("bili", MODE_PRIVATE).edit()
-                        .putString("cookies", sb.toString()).apply();
+                cookieVault.save(sb.toString());
             } catch (Exception ignored) { }
         }
 
         @JavascriptInterface
         public void clearCookies() {
             proxy.clearUserCookies();
-            getSharedPreferences("bili", MODE_PRIVATE).edit().remove("cookies").apply();
+            cookieVault.clear();
         }
 
         /** 大文件下载：原生流式下载到系统下载目录，进度/完成回调页面 cbId */
@@ -245,16 +255,18 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 HttpURLConnection conn = null;
                 try {
-                    conn = (HttpURLConnection) new URL(url).openConnection();
+                    URL target = UrlPolicy.validate(url, "media");
+                    conn = (HttpURLConnection) target.openConnection();
+                    conn.setInstanceFollowRedirects(false);
                     conn.setConnectTimeout(20000);
                     conn.setReadTimeout(60000);
                     conn.setRequestMethod("GET");
                     conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
                     conn.setRequestProperty("Referer", "https://www.bilibili.com/");
                     String ck = proxy.buildCookie();
-                    if (!ck.isEmpty()) conn.setRequestProperty("Cookie", ck);
+                    if (UrlPolicy.api(target) && !ck.isEmpty()) conn.setRequestProperty("Cookie", ck);
                     int status = conn.getResponseCode();
-                    if (status >= 400) {
+                    if (status != 200) {
                         jsCall(cbId, "onDone", "false", "\"HTTP " + status + "\"");
                         return;
                     }
@@ -279,6 +291,7 @@ public class MainActivity extends Activity {
                         os.close();
                         is.close();
                     }
+                    if (total >= 0 && got != total) throw new IOException("下载文件不完整");
                     pf.markDone();
                     jsCall(cbId, "onDone", "true", "\"已保存到下载目录：" + filename + "\"");
                 } catch (Exception e) {
@@ -376,30 +389,29 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean deleteFile(final String filename) {
             try {
+                UrlPolicy.filename(filename);
+                if (!getSharedPreferences("managed_downloads", MODE_PRIVATE).contains(filename)) return false;
                 if (Build.VERSION.SDK_INT >= 29) {
-                    String sel = MediaStore.Downloads.DISPLAY_NAME + "=?";
-                    int n = getContentResolver().delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI, sel, new String[]{filename});
+                    Uri uri = findDownloadUri(filename);
+                    if (uri == null) return false;
+                    int n = getContentResolver().delete(uri, null, null);
+                    if (n > 0) getSharedPreferences("managed_downloads", MODE_PRIVATE).edit().remove(filename).apply();
                     return n > 0;
                 }
                 File f = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), filename);
-                return f.exists() && f.delete();
+                boolean removed = f.exists() && f.delete();
+                if (removed) getSharedPreferences("managed_downloads", MODE_PRIVATE).edit().remove(filename).apply();
+                return removed;
             } catch (Exception ignored) { }
             return false;
         }
 
         private Uri findDownloadUri(String filename) {
+            try { UrlPolicy.filename(filename); } catch (IOException error) { return null; }
+            if (!getSharedPreferences("managed_downloads", MODE_PRIVATE).contains(filename)) return null;
             if (Build.VERSION.SDK_INT >= 29) {
-                try (Cursor c = getContentResolver().query(
-                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                        new String[]{MediaStore.Downloads._ID},
-                        MediaStore.Downloads.DISPLAY_NAME + "=?",
-                        new String[]{filename}, null)) {
-                    if (c != null && c.moveToFirst()) {
-                        long id = c.getLong(0);
-                        return ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id);
-                    }
-                } catch (Exception ignored) { }
-                return null;
+                String saved = getSharedPreferences("managed_downloads", MODE_PRIVATE).getString(filename, "");
+                return saved.startsWith("content://media/") ? Uri.parse(saved) : null;
             }
             File f = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), filename);
             return f.exists() ? Uri.fromFile(f) : null;
@@ -409,8 +421,10 @@ public class MainActivity extends Activity {
         private class PendingFile {
             final Uri uri;
             final File legacyFile;
-            PendingFile(Uri u, File f) { uri = u; legacyFile = f; }
+            final String name;
+            PendingFile(Uri u, File f, String n) { uri = u; legacyFile = f; name = n; }
             void markDone() {
+                getSharedPreferences("managed_downloads", MODE_PRIVATE).edit().putString(name, uri.toString()).apply();
                 if (Build.VERSION.SDK_INT >= 29) {
                     ContentValues done = new ContentValues();
                     done.put(MediaStore.Downloads.IS_PENDING, 0);
@@ -420,6 +434,7 @@ public class MainActivity extends Activity {
         }
 
         private PendingFile createPendingFile(String filename) throws IOException {
+            UrlPolicy.filename(filename);
             if (Build.VERSION.SDK_INT >= 29) {
                 ContentValues cv = new ContentValues();
                 cv.put(MediaStore.Downloads.DISPLAY_NAME, filename);
@@ -427,13 +442,13 @@ public class MainActivity extends Activity {
                 cv.put(MediaStore.Downloads.IS_PENDING, 1);
                 Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
                 if (uri == null) throw new IOException("MediaStore insert failed");
-                return new PendingFile(uri, null);
+                return new PendingFile(uri, null, filename);
             }
             File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
             if (!dir.exists()) dir.mkdirs();
             File f = new File(dir, filename);
-            f.createNewFile();
-            return new PendingFile(Uri.fromFile(f), f);
+            if (!f.createNewFile()) throw new IOException("同名文件已存在，请重命名后下载");
+            return new PendingFile(Uri.fromFile(f), f, filename);
         }
 
         private String mimeOf(String name) {
@@ -445,6 +460,7 @@ public class MainActivity extends Activity {
         }
 
         private void jsCall(final String cbId, final String fn, final String arg1, final String arg2) {
+            if (!cbId.matches("[a-zA-Z0-9_]+")) return;
             runOnUiThread(() -> {
                 if (webView != null) {
                     String js = "window.__dlCbs && window.__dlCbs['" + cbId + "'] && window.__dlCbs['" + cbId + "']." + fn + "(" + arg1 + (arg2.isEmpty() ? "" : "," + arg2) + ");";

@@ -791,3 +791,9 @@ body {
 .fav-url { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--sub); }
 .fav-url span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .fav-url .mini-btn { padding: 2px 8px; font-size: 11px; white-space: nowrap; }
+/* Task controls remain usable at narrow desktop widths. */
+.task-head { flex-wrap: wrap; }
+.task-pause, .task-retry { border: 1px solid #c4cddd; border-radius: 6px; background: transparent; color: inherit; padding: 4px 10px; cursor: pointer; }
+.task-pause:hover, .task-retry:hover { background: rgba(100, 130, 180, .12); }
+.task-pause:disabled { opacity: .55; cursor: wait; }
+.task-pause[hidden], .task-retry[hidden], .task-cancel[hidden] { display: none; }

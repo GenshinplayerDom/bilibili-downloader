@@ -18,7 +18,20 @@
   'use strict';
   var $ = function (s) { return document.querySelector(s); };
   var QNS = { 120: '4K 超清', 112: '1080P 高码率', 80: '1080P 高清', 64: '720P 高清', 32: '480P 清晰', 16: '360P 流畅' };
-  var WBI_KEY = '7cd084941338484aae1ad9425b84077c4932caff0ff746eab6f01bf08b70ac45';
+  var WBI_KEY = '';
+  var wbiExpires = 0;
+  function refreshWbiKey() {
+    if (WBI_KEY && Date.now() < wbiExpires) return Promise.resolve();
+    return fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' })
+      .then(function (response) { return response.json(); })
+      .then(function (json) {
+        var images = json.data && json.data.wbi_img;
+        if (!images) throw new Error('无法获取 WBI 密钥');
+        WBI_KEY = [images.img_url, images.sub_url].map(function (url) { return url.split('/').pop().split('.')[0]; }).join('');
+        if (WBI_KEY.length !== 64) throw new Error('无效的 WBI 密钥');
+        wbiExpires = Date.now() + 3600000;
+      });
+  }
   var MIXIN_KEY_ENC_TAB = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52];
   function mixinKey(orig) {
     var out = '';
@@ -83,6 +96,7 @@
     return p;
   }
   function apiGet(path, params) {
+    return refreshWbiKey().then(function () {
     var p = wbiSign(params || {});
     var q = Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
     var url = path + (path.indexOf('?') >= 0 ? '&' : '?') + q;
@@ -91,6 +105,7 @@
         if (j.code === 0) resolve(j.data);
         else reject(new Error(j.message || 'API 错误 ' + j.code));
       }).catch(reject);
+    });
     });
   }
   function getCid() {

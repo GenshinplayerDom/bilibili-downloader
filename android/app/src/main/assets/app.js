@@ -15,6 +15,23 @@
 
 (function () {
   'use strict';
+  var nativeFetch = window.fetch.bind(window);
+  var tokenMeta = document.querySelector('meta[name="bili-proxy-token"]');
+  var proxyAuth = window.biliAPI && window.biliAPI.proxyConfig
+    ? window.biliAPI.proxyConfig().catch(function () { return null; })
+    : Promise.resolve(tokenMeta ? { token: tokenMeta.content, port: Number(location.port) || 8123 } : null);
+  function fetch(url, options) {
+    var target = new URL(url, location.href);
+    if (!/^127\.0\.0\.[123]$|^localhost$/.test(target.hostname)) return nativeFetch(url, options);
+    return proxyAuth.then(function (auth) {
+      var opts = Object.assign({}, options);
+      if (auth && Number(target.port) === auth.port) {
+        opts.headers = new Headers(opts.headers || {});
+        opts.headers.set('X-Bili-Token', auth.token);
+      }
+      return nativeFetch(url, opts);
+    });
+  }
 
   /* ---------- DOM ---------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -111,7 +128,7 @@
   var taskSeq = 0;
   var tasks = [];            // 多任务列表
   var dlPathMap = {};        // filename → 实际保存路径（Electron will-download 回传）
-  var pendingSave = null;    // 等待路径回传的保存记录
+  var pendingSaves = {};    // blob URL → 独立的保存任务
 
   /* ---------- 工具 ---------- */
   var IS_ANDROID = !!(window.biliAPI && typeof window.biliAPI.isAndroid === 'function' && window.biliAPI.isAndroid());
@@ -181,8 +198,9 @@
     return v || '';
   }
   function proxyBase(host) {
+    if (IS_ANDROID) return 'https://appassets.androidplatform.net/proxy';
     var p = parseInt(proxyPortInput && proxyPortInput.value, 10);
-    var port = (p > 0 && p < 65536) ? p : 8123;
+    var port = tokenMeta ? (Number(location.port) || 8123) : (p > 0 && p < 65536) ? p : 8123;
     if (proxyMode() === 'custom') {
       var c = customProxyBase();
       if (c) return c.replace(/\/+$/, '');
@@ -500,7 +518,7 @@
       var t = String(ep.title || '');
       var label = /第.+[话集]/.test(t) ? t : (t ? '第 ' + t + ' 话' : '第 ' + (i + 1) + ' 话');
       if (ep.long_title) label += ' · ' + ep.long_title;
-      chip.innerHTML = '<span class="page-part">' + label + '</span>' +
+      chip.innerHTML = '<span class="page-part">' + escHtml(label) + '</span>' +
         '<span class="page-dur">' + fmtDur(ep.duration || 0) + '</span>';
       chip.addEventListener('click', function () { selectEpisode(i); });
       pagesList.appendChild(chip);
@@ -549,7 +567,7 @@
         var chip = document.createElement('button');
         chip.type = 'button';
         chip.className = 'page-chip' + (i === 0 ? ' active' : '');
-        chip.innerHTML = '<span class="page-part">P' + p.page + ' · ' + p.part + '</span>' +
+        chip.innerHTML = '<span class="page-part">P' + escHtml(p.page) + ' · ' + escHtml(p.part) + '</span>' +
           '<span class="page-dur">' + fmtDur(p.duration || 0) + '</span>';
         chip.addEventListener('click', function () { selectPage(i); });
         pagesList.appendChild(chip);
@@ -696,6 +714,11 @@
     return hex(h0) + hex(h1) + hex(h2) + hex(h3);
   }
 
+  function wbiMixinKey(raw) {
+    var order = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13];
+    if (raw.length !== 64) throw new Error('WBI 密钥长度无效');
+    return order.map(function (index) { return raw[index]; }).join('');
+  }
   var wbiCache = null;
   function fetchWbiKeys() {
     if (wbiCache && Date.now() - wbiCache.t < 3600e3) return Promise.resolve(wbiCache);
@@ -704,15 +727,15 @@
       var img = (data.wbi_img.img_url || '').split('/').pop().split('.')[0];
       var sub = (data.wbi_img.sub_url || '').split('/').pop().split('.')[0];
       if (!img || !sub) throw new Error('WBI 签名密钥为空');
-      wbiCache = { key: img + sub, t: Date.now() };
+      wbiCache = { key: wbiMixinKey(img + sub), t: Date.now() };
       return wbiCache;
     }, function () {
       return fetch(proxyBase() + '/status', { credentials: 'omit' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           var k = j && j.identity && j.identity.wbi_key;
-          if (k && k.length >= 32) {
-            wbiCache = { key: k, t: Date.now() };
+          if (k && k.length === 64) {
+            wbiCache = { key: wbiMixinKey(k), t: Date.now() };
             return wbiCache;
           }
           throw new Error('WBI 密钥获取失败');
@@ -728,7 +751,7 @@
           p[k] = params[k];
         }
       }
-      p.wts = Math.round(Date.now() / 1000);
+      p.wts = Math.floor(Date.now() / 1000);
       var keys = Object.keys(p).sort();
       var query = keys.map(function (k) {
         return k + '=' + encodeURIComponent(p[k]).replace(/[!'()*]/g, '');
@@ -738,11 +761,12 @@
     });
   }
 
-  function fetchPlayurl(fnval, qn) {
+  function fetchPlayurl(fnval, qn, source) {
+    var media = source || current;
     var params = {
-      bvid: current.bvid,
-      avid: current.aid,
-      cid: current.cid,
+      bvid: media.bvid,
+      avid: media.aid,
+      cid: media.cid,
       qn: qn || qnSelect.value,
       fnval: fnval,
       fourk: 1
@@ -863,10 +887,11 @@
       var end = Math.min(total - 1, (i + 1) * part - 1);
       if (start > end) { chunks[i] = new Uint8Array(0); return Promise.resolve(); }
       // 分片轮换主/备用 CDN 地址（再叠加代理 host 轮换），绕开单节点限速
-      var t = rotateHost(urls[i % urls.length], i);
+      received[i] = 0;
+      var t = rotateHost(urls[(i + (retried ? 1 : 0)) % urls.length], i);
       return fetch(t, { headers: { Range: 'bytes=' + start + '-' + end }, credentials: 'omit', signal: signal })
         .then(function (res) {
-          if (!res.ok && res.status !== 206) throw new Error('分段 ' + (i + 1) + ' 下载失败（HTTP ' + res.status + '）');
+          if (res.status !== 206 || res.headers.get('Content-Range') !== 'bytes ' + start + '-' + end + '/' + total) throw new Error('分段 ' + (i + 1) + ' 返回范围不匹配');
           if (!res.body || !res.body.getReader) {
             return res.arrayBuffer().then(function (ab) {
               received[i] = ab.byteLength;
@@ -895,7 +920,7 @@
           }
           return pump();
         })
-        .then(function (data) { chunks[i] = data; })
+        .then(function (data) { if (data.length !== end - start + 1) throw new Error('分片数据不完整'); chunks[i] = data; })
         .catch(function (err) {
           if (!retried && !(check && check())) return fetchPart(i, true);
           throw err;
@@ -966,6 +991,8 @@
 
   function saveBlob(blob, filename, task, meta) {
     var url = URL.createObjectURL(blob);
+    var rec = { filename: filename, size: blob.size, type: meta && meta.type, quality: meta && meta.quality };
+    if (task && window.biliAPI && window.biliAPI.isElectron) pendingSaves[url] = Object.assign({}, rec, { task: task });
     var a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -977,16 +1004,7 @@
     }, 800);
     // 下载记录：Electron 等待 will-download 回传精确路径；其他平台先记文件名
     if (!task) return;
-    var rec = { filename: filename, size: blob.size, type: meta && meta.type, quality: meta && meta.quality };
-    if (window.biliAPI && window.biliAPI.isElectron) {
-      pendingSave = Object.assign({}, rec, { task: task });
-      setTimeout(function () {
-        if (pendingSave && pendingSave.filename === filename) {
-          addHistoryRecord(rec);
-          pendingSave = null;
-        }
-      }, 1500);
-    } else {
+    if (!(window.biliAPI && window.biliAPI.isElectron)) {
       addHistoryRecord(rec);
     }
   }
@@ -1371,6 +1389,8 @@
     taskSeq++;
     var t = {
       id: taskSeq,
+      source: JSON.parse(JSON.stringify(current)),
+      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: fmtSelect.value, clip: clipInput.value, af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku.checked, subtitle: extraSub.checked },
       name: name,
       badge: badge,
       status: 'running',
@@ -1386,6 +1406,8 @@
       '<span class="task-name"></span>' +
       '<span class="task-badge"></span>' +
       '<span class="task-status">准备中</span>' +
+      '<button type="button" class="task-pause" hidden>暂停</button>' +
+      '<button type="button" class="task-retry" hidden>重试</button>' +
       '<button type="button" class="task-cancel">取消</button>' +
       '</div>' +
       '<div class="task-bar" style="--p:0%"></div>' +
@@ -1399,11 +1421,34 @@
     t.noteEl = card.querySelector('.task-note');
     t.actionsEl = card.querySelector('.task-actions');
     card.querySelector('.task-cancel').addEventListener('click', function () {
-      if (t.status !== 'running') return;
+      if (['running', 'paused', 'waiting'].indexOf(t.status) < 0) return;
+      if (t.timer) clearTimeout(t.timer);
       t.cancelled = true;
       if (t.cancelFn) t.cancelFn();
       setTaskStatus(t, 'cancelled', '已取消');
       setTaskNote(t, 'warn', '任务已取消');
+    });
+    t.pauseEl = card.querySelector('.task-pause');
+    t.retryEl = card.querySelector('.task-retry');
+    t.pauseEl.addEventListener('click', function () {
+      var paused = t.status === 'paused';
+      t.pauseEl.disabled = true;
+      var operation = paused ? window.biliAPI.resumeDownload : window.biliAPI.pauseDownload;
+      operation(t.token).then(function (result) {
+        if (result.ok && ['running', 'paused'].indexOf(t.status) >= 0) {
+          setTaskStatus(t, paused ? 'running' : 'paused', paused ? '继续下载中…' : '已暂停');
+          setTaskNote(t, 'warn', paused ? '继续下载剩余分片' : '已完成分片保留，点击继续下载');
+        }
+      }).catch(function (error) { showToast(error.message, 'fail'); }).finally(function () { t.pauseEl.disabled = false; });
+    });
+    t.retryEl.addEventListener('click', function () {
+      var retry = createTask(t.name, t.badge);
+      retry.source = JSON.parse(JSON.stringify(t.source)); retry.settings = Object.assign({}, t.settings);
+      retry.type = t.type; retry._part = t._part;
+      var prefix = t.source.bvid + ':' + t.source.cid + ':';
+      Object.keys(dlCache).forEach(function (key) { if (key.indexOf(prefix) === 0) delete dlCache[key]; });
+      saveDlCache(); updateDlCacheCount();
+      runTaskByType(retry);
     });
     tasksList.appendChild(card);
     tasksCard.hidden = false;
@@ -1434,8 +1479,16 @@
     t.actionsEl.appendChild(wrap);
   }
 
+  function updateTaskControls(t) {
+    if (!t.pauseEl) return;
+    t.pauseEl.hidden = !(window.biliAPI && window.biliAPI.pauseDownload && t.token && t.phase !== 'merging' && ['running', 'paused'].indexOf(t.status) >= 0);
+    t.pauseEl.textContent = t.status === 'paused' ? '继续' : '暂停';
+    t.retryEl.hidden = ['error', 'cancelled'].indexOf(t.status) < 0;
+    t.el.querySelector('.task-cancel').hidden = ['done', 'error', 'cancelled'].indexOf(t.status) >= 0;
+  }
   function setTaskStatus(t, status, text) {
     t.status = status;
+    updateTaskControls(t);
     t.statusEl.textContent = text || status;
     t.statusEl.className = 'task-status' +
       (status === 'done' ? ' done' : status === 'error' ? ' error' : status === 'cancelled' ? ' cancelled' : '');
@@ -1445,6 +1498,8 @@
     }
   }
   function setTaskProgress(t, frac, text, speed) {
+    if (t.cancelled || t.status === 'paused') return;
+    updateTaskControls(t);
     t.barEl.style.setProperty('--p', Math.max(0, Math.min(100, frac * 100)) + '%');
     if (text) {
       if (speed && speed > 0) {
@@ -1491,7 +1546,7 @@
       var waitMs = target - now;
       setTaskStatus(t, 'waiting', '等待定时开始（' + timerInput.value + '）');
       setTaskNote(t, 'warn', '已设置定时 ' + timerInput.value + ' 开始下载');
-      setTimeout(run, waitMs);
+      t.timer = setTimeout(function () { if (!t.cancelled) run(); }, waitMs);
     } else {
       run();
     }
@@ -1548,14 +1603,31 @@
     return { video: chosen, audio: aud, codec: usedCodec };
   }
 
+  function clientStreamDownload(task, urls, filename, meta) {
+    task.token = 'stream' + task.id;
+    task.cancelFn = function () { window.biliAPI.streamCancel(task.token); };
+    updateTaskControls(task);
+    return window.biliAPI.streamDownload({ token: task.token, urls: urls, filename: filename, threads: task.settings.threads }).then(function (res) {
+      if (task.cancelled) throw new Error('已取消');
+      if (!res || !res.ok) throw new Error(res && res.error || '下载失败');
+      filename = res.filename || filename;
+      task.path = res.path; task.savedFilename = filename;
+      setTaskStatus(task, 'done', '已完成');
+      setTaskNote(task, 'ok', '已保存：' + filename + '（' + fmtSize(res.size) + '）');
+      addHistoryRecord({ filename: filename, path: res.path, size: res.size, type: meta.type, quality: meta.quality });
+      showToast('下载完成：' + filename, 'ok');
+    }).catch(function (error) { handleTaskError(task, error); });
+  }
   function downloadVideo(task) {
     // 先等待高清能力探测完成，避免探测前的点击误走直链降级
     return waitMuxReady().then(function () { return downloadVideoInner(task); });
   }
   function downloadVideoInner(task) {
-    var qn = Number(qnSelect.value);
-    var threads = currentThreads();
-    var encPref = encSelect ? (encSelect.value || 'auto') : 'auto';
+    var current = task.source;
+    if (task.cancelled) return;
+    var qn = task.settings.qn;
+    var threads = task.settings.threads;
+    var encPref = task.settings.enc;
     setTaskStatus(task, 'running', '正在获取视频流…');
     setTaskNote(task, '', '');
 
@@ -1569,7 +1641,7 @@
         dashPromise = Promise.resolve(dCached);
       } else {
         setTaskStatus(task, 'running', '正在获取高清下载地址…');
-        dashPromise = fetchPlayurl(4048, qn).then(function (data) {
+        dashPromise = fetchPlayurl(4048, qn, current).then(function (data) {
           if (task.cancelled) throw new Error('已取消');
           var pick = pickDash(data, qn, encPref);
           if (!pick || !pick.video || !pick.video.baseUrl) throw new Error('未获取到 DASH 视频流');
@@ -1606,8 +1678,8 @@
       return dashPromise.then(function (entry) {
         if (task.cancelled) throw new Error('已取消');
         var page2 = current.pages && current.pages[current.pageIndex];
-        var fmt = (fmtSelect && fmtSelect.value === 'mkv') ? 'mkv' : 'mp4';
-        var clip = parseClip(clipInput ? clipInput.value : '');
+        var fmt = task.settings.format === 'mkv' ? 'mkv' : 'mp4';
+        var clip = parseClip(task.settings.clip);
         var ext = fmt === 'mkv' ? 'mkv' : 'mp4';
         var part = task._part || (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
         var filename = safeName(current.title) + part + '_' + entry.qualityName + '.' + ext;
@@ -1639,6 +1711,7 @@
         }).then(function (res) {
           if (task.cancelled) throw new Error('已取消');
           if (!res || !res.ok) throw new Error((res && res.error) || '合并失败');
+          filename = res.filename || filename;
           task.path = res.path;
           setTaskStatus(task, 'done', '已完成');
           setTaskNote(task, 'ok', '已保存：' + filename + '（' + fmtSize(res.size) + '）');
@@ -1663,11 +1736,11 @@
       durlPromise = Promise.resolve(cached);
     } else {
       setTaskStatus(task, 'running', '正在获取下载地址…');
-      durlPromise = fetchPlayurl(16, qn).then(function (data) {
+      durlPromise = fetchPlayurl(16, qn, current).then(function (data) {
         if (task.cancelled) throw new Error('已取消');
         if (data.durl && data.durl.length) return data;
         // 降级 fnval=1 兼容格式
-        return fetchPlayurl(1, qn).then(function (d2) {
+        return fetchPlayurl(1, qn, current).then(function (d2) {
           if (task.cancelled) throw new Error('已取消');
           if (!(d2.durl && d2.durl.length)) throw new Error('该清晰度暂无可直接下载的 MP4 流，请尝试其他清晰度或使用音频下载');
           d2._degraded = true;
@@ -1712,26 +1785,9 @@
         return;
       }
       if (window.biliAPI && window.biliAPI.streamDownload) {
-        // Electron：主进程流式下载（优化2：低内存 + 断点续传 .part + 实时速度）
-        task.token = 's' + task.id;
-        task.cancelFn = function () {
-          task.cancelled = true;
-          if (window.biliAPI.streamCancel) window.biliAPI.streamCancel(task.token);
-        };
-        setTaskStatus(task, 'running', threads + ' 线程流式下载中…');
-        window.biliAPI.streamDownload({ token: task.token, urls: entry.urls || url, filename: filename, threads: threads }).then(function (res) {
-          if (task.cancelled) throw new Error('已取消');
-          if (!res || !res.ok) throw new Error((res && res.error) || '下载失败');
-          task.path = res.path;
-          setTaskStatus(task, 'done', '已完成');
-          setTaskNote(task, 'ok', '已保存：' + filename + '（' + fmtSize(res.size) + '）');
-          showToast('✅ 下载完成：' + filename, 'ok');
-          addHistoryRecord({ filename: filename, path: res.path, size: res.size, type: 'video', quality: gotName });
-          downloadExtras(task, filename, page2);
-        }).catch(function (err) {
-          handleTaskError(task, err);
+        return clientStreamDownload(task, entry.urls || [entry.url], filename, { type: 'video', quality: gotName }).then(function () {
+          if (task.status === 'done') downloadExtras(task, task.savedFilename || filename, page2);
         });
-        return;
       }
       setTaskStatus(task, 'running', threads + ' 线程下载中（CDN 轮换）');
       var dl = fetchStream(entry.urls || url, function (frac) {
@@ -1753,30 +1809,31 @@
   }
 
   /* ---------- v1.2：附带弹幕 / 字幕下载（功能4） ---------- */
-  function fetchSubtitleUrl() {
+  function fetchSubtitleUrl(current) {
     // 通过代理请求 x/player/v2 取字幕地址（可选；失败返回 null）
     if (!current || !current.bvid || !current.cid) return Promise.resolve(null);
     var params = { bvid: current.bvid, cid: current.cid };
     return wbiSign(params).then(function (signed) {
       var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
       return apiGet('https://api.bilibili.com/x/player/v2?' + q).then(function (j) {
-        var subs = (j && j.data && j.data.subtitle && j.data.subtitle.subtitles) || [];
+        var subs = (j && j.subtitle && j.subtitle.subtitles) || [];
         return (subs.length && subs[0].subtitle_url) ? subs[0].subtitle_url : null;
       }).catch(function () { return null; });
     }).catch(function () { return Promise.resolve(null); });
   }
   function downloadExtras(task, filename, page) {
+    var current = task.source;
     if (!window.biliAPI || !window.biliAPI.fetchDanmaku) return;
-    var wantDm = extraDanmaku && extraDanmaku.checked;
-    var wantSub = extraSub && extraSub.checked;
+    var wantDm = task.settings.danmaku;
+    var wantSub = task.settings.subtitle;
     if (!wantDm && !wantSub) return;
     var base = String(filename).replace(/\.[^.]+$/, '');
     var cid = (page && page.cid) ? page.cid : (current ? current.cid : 0);
     if (!cid) return;
     setTaskNote(task, 'warn', '正在下载附带弹幕 / 字幕…');
-    var subUrlPromise = wantSub ? fetchSubtitleUrl() : Promise.resolve(null);
+    var subUrlPromise = wantSub ? fetchSubtitleUrl(current) : Promise.resolve(null);
     subUrlPromise.then(function (subUrl) {
-      return window.biliAPI.fetchDanmaku({ cid: cid, filename: base, subUrl: subUrl });
+      return window.biliAPI.fetchDanmaku({ cid: cid, filename: base, subUrl: subUrl, danmaku: wantDm });
     }).then(function (r) {
       if (r && r.ok) {
         var parts = [];
@@ -1790,9 +1847,11 @@
   }
 
   function downloadAudio(task) {
-    var fmt = afSelect.value;        // m4a（默认原版）/ mp3（转码）
-    var aq = Number(aqSelect.value);
-    var threads = currentThreads();
+    var current = task.source;
+    if (task.cancelled) return;
+    var fmt = task.settings.af;        // m4a（默认原版）/ mp3（转码）
+    var aq = task.settings.aq;
+    var threads = task.settings.threads;
     setTaskStatus(task, 'running', '正在获取音频流…');
     setTaskNote(task, '', '');
 
@@ -1805,7 +1864,7 @@
       audioPromise = Promise.resolve(cached);
     } else {
       setTaskStatus(task, 'running', '正在获取下载地址…');
-      audioPromise = fetchPlayurl(4048).then(function (data) {
+      audioPromise = fetchPlayurl(4048, task.settings.qn, current).then(function (data) {
         var dash = data.dash;
         var audio = dash && dash.audio && dash.audio.length ? dash.audio : null;
         if (!audio) throw new Error('未获取到音频流（该视频可能无 DASH 音频）');
@@ -1846,25 +1905,7 @@
           return;
         }
         if (window.biliAPI && window.biliAPI.streamDownload) {
-          // Electron：主进程流式（优化2：低内存 + 断点续传 + 实时速度）
-          task.token = 's' + task.id;
-          task.cancelFn = function () {
-            task.cancelled = true;
-            if (window.biliAPI.streamCancel) window.biliAPI.streamCancel(task.token);
-          };
-          setTaskStatus(task, 'running', threads + ' 线程流式下载中…');
-          window.biliAPI.streamDownload({ token: task.token, urls: entry.urls || url, filename: filenameM4a, threads: threads }).then(function (res) {
-            if (task.cancelled) throw new Error('已取消');
-            if (!res || !res.ok) throw new Error((res && res.error) || '下载失败');
-            task.path = res.path;
-            setTaskStatus(task, 'done', '已完成');
-            setTaskNote(task, 'ok', '已保存 M4A 音频：' + filenameM4a + '（' + fmtSize(res.size) + '）');
-            showToast('✅ 音频下载完成：' + filenameM4a, 'ok');
-            addHistoryRecord({ filename: filenameM4a, path: res.path, size: res.size, type: 'audio', quality: entry.bandwidthName });
-          }).catch(function (err) {
-            handleTaskError(task, err);
-          });
-          return;
+          return clientStreamDownload(task, entry.urls || [url], filenameM4a, { type: 'audio', quality: entry.bandwidthName });
         }
         setTaskStatus(task, 'running', threads + ' 线程下载中（CDN 轮换）');
         var dl1 = fetchStream(entry.urls || url, function (frac) {
@@ -1938,6 +1979,7 @@
 
   function handleTaskError(task, err) {
     console.warn('[哔哩下载器] 任务失败：', err);
+    if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); return; }
     var msg = err && err.message ? err.message : '下载失败';
     if (/412|访问过于频繁|风控/i.test(msg)) {
       msg = 'B 站风控拦截了本次请求（HTTP 412）。代理已自动换新设备身份重试仍被拦截，通常是因为短时间请求过多，请稍等 1~2 分钟再试。';
@@ -2186,6 +2228,7 @@
     optEnc.hidden = type !== 'video' || IS_ANDROID;
     optAudio.hidden = type !== 'audio';
     optAq.hidden = !(type === 'audio' && afSelect.value === 'mp3');
+    ['opt-format', 'opt-clip', 'opt-extra'].forEach(function (id) { var element = $(id); if (element) element.hidden = type !== 'video' || IS_ANDROID; });
   });
   afSelect.addEventListener('change', function () {
     optAq.hidden = afSelect.value !== 'mp3';
@@ -2242,10 +2285,10 @@
   historyBack.addEventListener('click', closeHistoryPanel);
   if (tasksClearDone) {
     tasksClearDone.addEventListener('click', function () {
-      var done = tasks.filter(function (t) { return t.status !== 'running'; });
+      var done = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) >= 0; });
       if (!done.length) { showToast('暂无已完成的任务', 'warn'); return; }
       done.forEach(function (t) { try { t.el.remove(); } catch (e) { } });
-      tasks = tasks.filter(function (t) { return t.status === 'running'; });
+      tasks = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
       tasksCard.hidden = tasks.length === 0;
       showToast('✅ 已清除 ' + done.length + ' 条已完成任务', 'ok');
     });
@@ -2656,15 +2699,14 @@
     window.biliAPI.onDlPath(function (d) {
       if (!d || !d.filename) return;
       dlPathMap[d.filename] = d.path;
-      if (pendingSave) {
-        var base = String(pendingSave.filename || '').replace(/\.[^.]+$/, '');
-        var hit = pendingSave.filename === d.filename || d.filename.indexOf(base) === 0;
-        if (hit) {
-          pendingSave.task.path = d.path;
-          bindTaskActions(pendingSave.task);
-          addHistoryRecord({ filename: d.filename, path: d.path, size: pendingSave.size, type: pendingSave.type, quality: pendingSave.quality });
-          pendingSave = null;
-        }
+      var pending = pendingSaves[d.url];
+      if (pending) {
+        delete pendingSaves[d.url];
+        if (d.error) { handleTaskError(pending.task, new Error(d.error)); return; }
+        pending.task.path = d.path;
+        bindTaskActions(pending.task);
+        setTaskNote(pending.task, 'ok', '已保存：' + d.filename);
+        addHistoryRecord({ filename: d.filename, path: d.path, size: pending.size, type: pending.type, quality: pending.quality });
       }
     });
   }
@@ -2674,12 +2716,13 @@
       for (var i = 0; i < tasks.length; i++) {
         var tk = tasks[i];
         if (tk.token === d.token && tk.status === 'running') {
+          if (d.phase) tk.phase = d.phase;
           setTaskProgress(tk, d.frac || 0, (d.stage || '下载中') + (d.frac >= 1 ? '' : ' ' + ((d.frac || 0) * 100).toFixed(1) + '%'), d.speed);
         }
       }
     });
   }
-  // 直链流式下载进度（Electron durl/音频：低内存 + 断点续传 + 实时速度）
+  // 直链流式下载进度（Electron durl/音频：低内存 + 会话内暂停恢复 + 实时速度）
   if (window.biliAPI && window.biliAPI.onStreamProgress) {
     window.biliAPI.onStreamProgress(function (d) {
       if (!d || !d.token) return;
