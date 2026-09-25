@@ -17,9 +17,11 @@
   'use strict';
   var nativeFetch = window.fetch.bind(window);
   var tokenMeta = document.querySelector('meta[name="bili-proxy-token"]');
+  var effectivePort = null;   // 实际代理端口（Electron 端口自动探测时可能与默认 8123 不同）
   var proxyAuth = window.biliAPI && window.biliAPI.proxyConfig
     ? window.biliAPI.proxyConfig().catch(function () { return null; })
     : Promise.resolve(tokenMeta ? { token: tokenMeta.content, port: Number(location.port) || 8123 } : null);
+  proxyAuth.then(function (auth) { if (auth && auth.port) effectivePort = auth.port; });
   function fetch(url, options) {
     var target = new URL(url, location.href);
     if (!/^127\.0\.0\.[123]$|^localhost$/.test(target.hostname)) return nativeFetch(url, options);
@@ -216,7 +218,8 @@
   function proxyBase(host) {
     if (IS_ANDROID) return 'https://appassets.androidplatform.net/proxy';
     var p = parseInt(proxyPortInput && proxyPortInput.value, 10);
-    var port = tokenMeta ? (Number(location.port) || 8123) : (p > 0 && p < 65536) ? p : 8123;
+    // Electron：优先使用代理实际监听端口（端口自动探测时可能与 8123 不同）
+    var port = effectivePort || (tokenMeta ? (Number(location.port) || 8123) : (p > 0 && p < 65536) ? p : 8123);
     if (proxyMode() === 'custom') {
       var c = customProxyBase();
       if (c) return c.replace(/\/+$/, '');

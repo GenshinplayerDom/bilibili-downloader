@@ -45,7 +45,7 @@ function sendProgress(channel, data) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
 }
 
-const PROXY_PORT = 8123;
+let PROXY_PORT = 8123;
 const LOGIN_URL = 'https://passport.bilibili.com/login';
 let win = null;
 let loginWin = null;
@@ -66,8 +66,18 @@ function logMsg(kind, msg) {
   } catch (e) { }
 }
 function logError(msg) { logMsg('error', msg); }
-/* ---------- 内置代理 ---------- */
-async function startProxy() { await proxy.start(PROXY_PORT); }
+/* ---------- 内置代理（端口自动探测：8123 被占用时顺延，避免代理起不来导致无法解析） ---------- */
+async function startProxy() {
+  for (let p = 8123; p <= 8138; p++) {
+    try {
+      await proxy.start(p);
+      PROXY_PORT = p;
+      return { ok: true, port: p };
+    } catch (error) {
+      if (p === 8138) throw error;   // 全部被占用则抛错，由一键修复兜底
+    }
+  }
+}
 
 async function restartProxy() {
   await proxy.stop();
