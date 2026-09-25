@@ -654,6 +654,17 @@ function registerIpc() {
     return { ok: true, dir: dir };
   });
 
+  /* ---- 用系统默认浏览器打开外部链接（开源仓库等） ---- */
+  ipcMain.handle('bili:open-external', function (event, url) {
+    if (!/^https?:\/\//i.test(String(url || ''))) return { ok: false };
+    try {
+      shell.openExternal(url);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+
   /* ---- DASH 高清合并 ---- */
   ipcMain.handle('bili:mux-available', function () {
     return { ok: !!ffmpegPath() };

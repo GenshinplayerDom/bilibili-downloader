@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('biliAPI', {
       return !!(r && r.ok);
     });
   },
+  openExternal: function (url) {
+    return ipcRenderer.invoke('bili:open-external', url).then(function (r) {
+      return !!(r && r.ok);
+    });
+  },
   /* DASH 高清 */
   muxAvailable: function () {
     return ipcRenderer.invoke('bili:mux-available').then(function (r) {
