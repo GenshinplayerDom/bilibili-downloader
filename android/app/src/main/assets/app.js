@@ -358,6 +358,8 @@
     if (m) return { kind: 'season', ssId: m[1] };
     m = text.match(/(?:^|[^A-Za-z0-9])ep(\d+)/i);
     if (m) return { kind: 'bangumi', epId: m[1] };
+    m = text.match(/favlist\?fid=(\d+)/i);
+    if (m) return { kind: 'favlist', fid: m[1] };
     m = text.match(/BV[0-9A-Za-z]{10}/);
     if (m) return { kind: 'video', bvid: m[0] };
     m = text.match(/(?:^|[^A-Za-z0-9])(?:av|AV)(\d+)/);
@@ -426,6 +428,10 @@
         setStatus('loading', '正在获取剧集信息…');
         return viewByEp(p.epId).then(function (data) { return { p: p, data: data }; });
       }
+      if (p.kind === 'favlist') {
+        setStatus('loading', '正在读取收藏夹视频…');
+        return loadFavlistData(p.fid).then(function (data) { return { p: p, data: data }; });
+      }
       setStatus('loading', '正在获取视频信息…');
       return viewByVideo(p).then(function (data) { return { p: p, data: data }; });
     }).then(function (res) {
@@ -433,6 +439,8 @@
       if (!data) throw new Error('未获取到视频数据');
       if (res.p.kind === 'season') {
         renderSeason(data);
+      } else if (res.p.kind === 'favlist') {
+        renderFavlist(data);
       } else {
         current = {
           kind: 'video',
@@ -530,7 +538,10 @@
   function renderCurrent() {
     renderCard();
     var hasMulti = current.kind === 'video' ? (current.pages && current.pages.length > 1) : (current.kind === 'bangumi' && current.episodes && current.episodes.length > 1);
-    if (btnAll) btnAll.hidden = !hasMulti;
+    if (btnAll) {
+      btnAll.hidden = !hasMulti;
+      btnAll.textContent = current.favlist ? ('下载全部 P（' + (current.pages || []).length + ' 个视频）') : '下载全部 P / 集';
+    }
     if (current.kind === 'video' && current.pages.length > 1) {
       pagesPanel.hidden = false;
       pagesList.innerHTML = '';
@@ -551,10 +562,53 @@
   function selectPage(idx) {
     var p = current.pages[idx];
     current.pageIndex = idx;
+    // 收藏夹 / 合集每个 P 可能是独立视频（独立 bvid），需一并切换
+    if (p.bvid) current.bvid = p.bvid;
+    if (p.aid) current.aid = p.aid;
     current.cid = p.cid;
     var chips = pagesList.children;
     for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('active', i === idx);
     setNote('ok', '已切换到 P' + p.page + ' · ' + p.part);
+    probeAcceptQuality().then(fillQnOptions);
+  }
+
+  /* ---------- 收藏夹网址解析（favlist?fid=xx） ---------- */
+  function loadFavlistData(fid) {
+    var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/resource/list?media_id=' + fid + '&pn=1&ps=20');
+    return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.code && j.code !== 0) throw new Error('读取收藏夹失败：' + (j.message || j.code));
+      var d = (j && j.data) || {};
+      var medias = d.medias || [];
+      if (!medias.length) throw new Error('该收藏夹暂无视频');
+      return { title: d.info ? d.info.title : ('收藏夹 ' + fid), medias: medias };
+    });
+  }
+  function renderFavlist(data) {
+    var medias = data.medias.slice(0, 50);
+    var pages = medias.map(function (m, i) {
+      return { cid: m.cid, bvid: m.bvid, aid: m.aid, page: i + 1, part: m.title, duration: m.duration || 0, pic: m.pic || '' };
+    });
+    var first = pages[0];
+    current = {
+      kind: 'video',
+      bvid: first.bvid,
+      aid: first.aid,
+      cid: first.cid,
+      title: data.title + '（收藏夹 · 前 ' + pages.length + ' 个视频）',
+      pic: first.pic || '',
+      up: '',
+      duration: first.duration || 0,
+      stat: {},
+      pubdate: 0,
+      pages: pages,
+      pageIndex: 0,
+      favlist: true
+    };
+    setFinderState('done');
+    setStatus('ok', '收藏夹解析成功，请选择要下载的视频（或点「下载全部 P」）');
+    resultEl.hidden = false;
+    renderCurrent();
+    if (btnAll) { btnAll.hidden = false; btnAll.textContent = '下载全部 P（' + pages.length + ' 个视频）'; }
     probeAcceptQuality().then(fillQnOptions);
   }
 
@@ -1549,13 +1603,14 @@
           return entry;
         });
       }
-      dashPromise.then(function (entry) {
+      return dashPromise.then(function (entry) {
         if (task.cancelled) throw new Error('已取消');
         var page2 = current.pages && current.pages[current.pageIndex];
         var fmt = (fmtSelect && fmtSelect.value === 'mkv') ? 'mkv' : 'mp4';
         var clip = parseClip(clipInput ? clipInput.value : '');
         var ext = fmt === 'mkv' ? 'mkv' : 'mp4';
-        var filename = safeName(current.title) + (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '') + '_' + entry.qualityName + '.' + ext;
+        var part = task._part || (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
+        var filename = safeName(current.title) + part + '_' + entry.qualityName + '.' + ext;
         var codecTip = '';
         if (entry.codecs && String(entry.codecs).indexOf('avc1') < 0) {
           codecTip = '（编码 ' + (/hev1|hvc1/i.test(entry.codecs) ? 'H.265' : 'AV1') + '，播放器不支持时请用 VLC / PotPlayer）';
@@ -1598,7 +1653,6 @@
       });
       return;
     }
-
     // 无 ffmpeg 环境（Android/网页）：回落 durl 直链流程
     var cacheKey = dlCacheKey(current.bvid, current.cid, 16, qn);
     var cached = getDlCache(cacheKey);
@@ -1642,13 +1696,14 @@
       });
     }
 
-    durlPromise.then(function (entry) {
+    return durlPromise.then(function (entry) {
       if (task.cancelled) throw new Error('已取消');
       var gotName = entry.qualityName;
       var got = entry.quality || 0;
       setTaskNote(task, 'warn', '服务端实际返回：' + gotName + (got < qn ? '（未登录环境清晰度受限）' : '') + (entry.degraded ? '（已自动切换兼容格式）' : ''));
       var page2 = current.pages && current.pages[current.pageIndex];
-      var filename = safeName(current.title) + (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '') + '_' + gotName + '.mp4';
+      var part = task._part || (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
+      var filename = safeName(current.title) + part + '_' + gotName + '.mp4';
       var url = entry.url;
       if (IS_ANDROID && window.biliAPI && window.biliAPI.download) {
         // Android：原生流式下载直链（带 Referer/身份，绕开大文件 blob 内存限制）
@@ -1777,11 +1832,11 @@
       });
     }
 
-    audioPromise.then(function (entry) {
+    return audioPromise.then(function (entry) {
       if (task.cancelled) throw new Error('已取消');
       var url = entry.url;
       var page = current.pages && current.pages[current.pageIndex];
-      var baseName = safeName(current.title) + (page && current.pages.length > 1 ? ' [P' + page.page + ']' : '');
+      var baseName = safeName(current.title) + (task._part || (page && current.pages.length > 1 ? ' [P' + page.page + ']' : ''));
 
       if (fmt === 'm4a') {
         var filenameM4a = baseName + '_' + entry.bandwidthName + '.m4a';
@@ -2324,21 +2379,43 @@
     var n = list.length;
     showToast('⏳ 开始批量下载 ' + n + ' 个任务（顺序执行）', 'warn');
     var i = 0;
+    // 快照当前状态：批量期间修改 current，结束后恢复，避免影响后续单次下载
+    var snap = { bvid: current.bvid, aid: current.aid, cid: current.cid, pageIndex: current.pageIndex };
+    if (btnAll) btnAll.disabled = true;
+    // 任务状态轮询（可靠判断完成：兼容 DASH/直链/流式/转码全部分支）
+    var waitDone = function (t, cb) {
+      if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') { cb(); return; }
+      var iv = setInterval(function () {
+        if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') {
+          clearInterval(iv);
+          cb();
+        }
+      }, 300);
+    };
     var next = function () {
-      if (i >= n) { showToast('✅ 批量下载完成', 'ok'); return; }
+      if (i >= n) {
+        current.bvid = snap.bvid; current.aid = snap.aid; current.cid = snap.cid; current.pageIndex = snap.pageIndex;
+        if (btnAll) btnAll.disabled = false;
+        showToast('✅ 批量下载完成（' + n + ' 个任务）', 'ok');
+        return;
+      }
       var p = list[i];
       i++;
-      var oldB = current.bvid, oldA = current.aid, oldC = current.cid;
-      current.bvid = p.bvid || oldB;
-      current.aid = p.aid || oldA;
+      current.bvid = p.bvid || snap.bvid;
+      current.aid = p.aid || snap.aid;
       current.cid = p.cid;
+      current.pageIndex = i - 1;
       var label = isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
       var t = createTask(safeName(current.title) + ' [' + label + ']', isSeason ? '番剧' : '分P');
-      t.type = typeSeg.querySelector('.seg-btn.active').dataset.type || 'video';
-      runTaskByType(t).then(function () {
-        if (!t.cancelled && t.status === 'done') next();
-        else next();
-      }).catch(function () { next(); });
+      t.type = (typeSeg.querySelector('.seg-btn.active') || { dataset: { type: 'video' } }).dataset.type || 'video';
+      t._part = ' [' + label + ']';
+      try {
+        runTaskByType(t);
+      } catch (e) {
+        setTaskStatus(t, 'error', '启动失败');
+        setTaskNote(t, 'fail', e && e.message ? e.message : '未知错误');
+      }
+      waitDone(t, next);
     };
     next();
   }
@@ -2405,34 +2482,81 @@
       var uid = null;
       fetch(proxyBase() + '/login-cookies', { credentials: 'omit' }).then(function (r) { return r.json(); })
         .then(function (j) {
-          if (!j || !j.login || !j.uid) throw new Error('请先登录');
-          uid = j.uid;
+          var lg = (j && j.login) || {};
+          if (!lg.logged || !lg.uid) throw new Error('请先登录（设置 → 登录哔哩哔哩）');
+          uid = lg.uid;
           var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=' + uid);
           return fetch(u, { credentials: 'omit' });
         }).then(function (r) { return r.json(); })
         .then(function (j) {
           var list = (j && j.data && j.data.list) || [];
+          if (j && j.code && j.code !== 0) throw new Error('B 站返回：' + (j.message || j.code));
           if (!list.length) throw new Error('暂无收藏夹');
           favList.innerHTML = '';
           list.slice(0, 10).forEach(function (f) {
             var row = document.createElement('div');
             row.className = 'fav-item';
-            row.textContent = f.title + '（' + f.media_count + '）';
+            // 收藏夹网址（功能：显示并一键复制）
+            var favUrl = 'https://space.bilibili.com/' + uid + '/favlist?fid=' + f.id;
+            var head = document.createElement('div');
+            head.className = 'fav-head';
+            head.innerHTML = '<span class="fav-title"></span>';
+            head.querySelector('.fav-title').textContent = f.title + '（' + f.media_count + '）';
+            row.appendChild(head);
+            var urlRow = document.createElement('div');
+            urlRow.className = 'fav-url';
+            var a = document.createElement('span');
+            a.textContent = favUrl;
+            a.title = favUrl;
+            var cp = document.createElement('button');
+            cp.type = 'button';
+            cp.className = 'mini-btn';
+            cp.textContent = '复制网址';
+            cp.addEventListener('click', function (ev) {
+              ev.stopPropagation();
+              copyText(favUrl);
+            });
+            urlRow.appendChild(a);
+            urlRow.appendChild(cp);
+            row.appendChild(urlRow);
             row.title = '点击下载其中前 20 个视频';
             row.addEventListener('click', function () { loadFavVideos(f.id, f.title); });
             favList.appendChild(row);
           });
-          if (favNote) favNote.textContent = '共 ' + list.length + ' 个收藏夹，点击加载视频（前 10 个显示）';
+          if (favNote) favNote.textContent = '共 ' + list.length + ' 个收藏夹，点击条目加载视频（前 10 个显示），点「复制网址」可复制收藏夹链接';
         }).catch(function (e) {
           favList.innerHTML = '<div class="fav-loading" style="color:#c0392b">' + escHtml(e.message) + '</div>';
         });
     });
+  }
+  function copyText(txt) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { showToast('✅ 网址已复制', 'ok'); }).catch(function () { fallbackCopy(txt); });
+    } else {
+      fallbackCopy(txt);
+    }
+  }
+  function fallbackCopy(txt) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('✅ 网址已复制', 'ok');
+    } catch (e) {
+      showToast('复制失败，请手动复制', 'fail');
+    }
   }
   function loadFavVideos(mediaId, name) {
     favList.innerHTML = '<div class="fav-loading">加载收藏夹视频…</div>';
     var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/resource/list?media_id=' + mediaId + '&pn=1&ps=20');
     fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); })
       .then(function (j) {
+        if (j && j.code && j.code !== 0) throw new Error('B 站返回：' + (j.message || j.code));
         var list = (j && j.data && j.data.medias) || [];
         if (!list.length) throw new Error('该收藏夹暂无视频');
         favList.innerHTML = '';

@@ -783,3 +783,11 @@ body {
 .set-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .set-row .set-label { min-width: 76px; color: var(--sub); font-size: 13px; }
 .set-section .checkbox-label { margin-right: 12px; }
+
+/* 收藏夹网址行 */
+.fav-item { padding: 8px 10px; }
+.fav-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.fav-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fav-url { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--sub); }
+.fav-url span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.fav-url .mini-btn { padding: 2px 8px; font-size: 11px; white-space: nowrap; }

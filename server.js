@@ -271,8 +271,26 @@ function resetBuvid() {
   return ensureBuvid(true);
 }
 
-/* ---------- 转发 B 站 API（带身份 + 412 自动换身份重试） ---------- */
+/* ---------- WBI 签名（对 /x/ 接口自动附加 wts + w_rid，修复收藏夹等接口 412） ---------- */
+var MIXIN_KEY_ENC_TAB = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52];
+function wbiMixinKey(orig) {
+  var out = '';
+  for (var i = 0; i < 32; i++) out += (orig || '')[MIXIN_KEY_ENC_TAB[i]];
+  return out;
+}
+function wbiSignUrl(url) {
+  var u = urlMod.parse(url, true);
+  if (!/^\/x\//.test(u.pathname) || u.query.w_rid || !identity.wbiKey) return url;
+  u.query.wts = Math.floor(Date.now() / 1000);
+  var q = Object.keys(u.query).sort().map(function (k) { return k + '=' + encodeURIComponent(u.query[k]); }).join('&');
+  u.query.w_rid = crypto.createHash('md5').update(q + wbiMixinKey(identity.wbiKey)).digest('hex');
+  u.search = urlMod.format(u.query);
+  return urlMod.format(u);
+}
+
+/* ---------- 转发 B 站 API（带身份 + WBI 签名 + 412 自动换身份重试） ---------- */
 function biliGet(url) {
+  url = wbiSignUrl(url);
   return httpsGet(url, {
     'User-Agent': UA,
     'Referer': 'https://www.bilibili.com/',
