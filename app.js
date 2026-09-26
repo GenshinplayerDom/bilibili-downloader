@@ -196,6 +196,22 @@
   var pendingSaves = {};    // blob URL → 独立的保存任务
 
   /* ---------- 工具 ---------- */
+  // 全局 fetch 超时保护：任何网络请求最多等待 25s，避免请求挂起导致页面卡死（Android 网络不稳时尤其重要）
+  (function () {
+    var origFetch = window.fetch;
+    if (!origFetch) return;
+    window.fetch = function (input, init) {
+      var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) { } }, 15000) : null;
+      var opts = init || {};
+      if (ctrl && !opts.signal) opts.signal = ctrl.signal;
+      var p;
+      try { p = origFetch(input, opts); } catch (e) { if (timer) clearTimeout(timer); throw e; }
+      return p.then(function (r) { if (timer) clearTimeout(timer); return r; },
+        function (e) { if (timer) clearTimeout(timer); throw e; });
+    };
+  })();
+
   var IS_ANDROID = !!(window.biliAPI && typeof window.biliAPI.isAndroid === 'function' && window.biliAPI.isAndroid());
   var androidCbSeq = 0;
   if (IS_ANDROID) {
@@ -204,6 +220,40 @@
       var el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
+    // Android 专用优化：隐藏桌面专属功能（网络重置 / 下载限速 / 代理方式与端口 / 一键修复）
+    var hideIds = ['net-reset-btn', 'net-reset-logs', 'rate-limit', 'proxy-mode', 'proxy-port', 'custom-proxy-block', 'fix-btn', 'speedtest-btn', 'fix-logs'];
+    hideIds.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.closest('.set-block, .set-row, section') && el.parentNode && el.parentNode.parentNode && el.parentNode.parentNode.classList && el.parentNode.parentNode.classList.contains('set-section') && el.parentNode.parentNode.hidden !== undefined
+        ? el.parentNode.parentNode.hidden = false : 0;
+      if (el) el.hidden = true;
+      var row = el && (el.closest('.set-row') || el.closest('.set-block'));
+      if (row && row.parentNode && row.parentNode.tagName === 'SECTION') { /* 保留区块结构 */ }
+      if (el && el.id === 'rate-limit') {
+        var row2 = el.closest('.set-row');
+        if (row2) row2.hidden = true;
+      }
+    });
+    // 代理区块整段隐藏（Android 内置代理，无需设置）
+    var proxySection = document.querySelector('.settings-panel .set-section:first-of-type');
+    if (proxySection) {
+      var head = proxySection.querySelector('h3');
+      if (head && head.textContent.indexOf('代理') >= 0) proxySection.hidden = true;
+    }
+    // 网络重置区块整段隐藏
+    var secs = document.querySelectorAll('.settings-panel .set-section');
+    for (var si = 0; si < secs.length; si++) {
+      var h = secs[si].querySelector('h3');
+      if (h && (h.textContent.indexOf('网络重置') >= 0)) secs[si].hidden = true;
+    }
+    // 使用教程里的网络重置条目删除
+    var tut = document.querySelector('.tutorial');
+    if (tut) {
+      var lis = tut.querySelectorAll('li');
+      for (var li = 0; li < lis.length; li++) {
+        if (lis[li].textContent.indexOf('网络被限速') >= 0) lis[li].hidden = true;
+      }
+    }
   }
 
   function fmtCount(n) {
@@ -1426,6 +1476,15 @@
   }
 
   /* ---------- 下载核心 ---------- */
+  // B 站多 CDN 调度可能返回 mcdn 域名（部分网络/区域下 403 无法下载），
+  // 排序时优先主域（bilivideo.com / upos），下载器会按序尝试直至可用
+  function cdnRank(urls) {
+    return (urls || []).slice().filter(Boolean).sort(function (a, b) {
+      var am = /mcdn|mountaintoys/i.test(a) ? 1 : 0;
+      var bm = /mcdn|mountaintoys/i.test(b) ? 1 : 0;
+      return am - bm;
+    });
+  }
   function currentThreads() {
     var v = parseInt(threadSelect && threadSelect.value, 10);
     return (v >= 4 && v <= 16) ? v : 8;
@@ -1641,10 +1700,10 @@
       },
       onDone: function (ok, msg) {
         delete window.__dlCbs[cbId];
-        if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
+        if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); setTaskNote(task, 'warn', T('taskCancelled')); return; }
         if (ok) {
           task.path = filename;
-          setTaskStatus(task, 'done', '已完成');
+          setTaskStatus(task, 'done', T('done'));
           setTaskNote(task, 'ok', msg);
           showToast('✅ ' + msg, 'ok');
           addHistoryRecord({ filename: filename, path: filename, size: 0, type: meta && meta.type, quality: meta && meta.quality });
@@ -1678,10 +1737,10 @@
       },
       onDone: function (ok, msg) {
         delete window.__dlCbs[cbId];
-        if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
+        if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); setTaskNote(task, 'warn', T('taskCancelled')); return; }
         if (ok) {
           task.path = filename;
-          setTaskStatus(task, 'done', '已完成');
+          setTaskStatus(task, 'done', T('done'));
           setTaskNote(task, 'ok', msg);
           showToast('✅ ' + msg, 'ok');
           addHistoryRecord({ filename: filename, path: filename, size: 0, type: 'video', quality: entry.qualityName });
@@ -1707,10 +1766,10 @@
       },
       onDone: function (ok, msg) {
         delete window.__dlCbs[cbId];
-        if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
+        if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); setTaskNote(task, 'warn', T('taskCancelled')); return; }
         if (ok) {
           task.path = filename;
-          setTaskStatus(task, 'done', '已完成');
+          setTaskStatus(task, 'done', T('done'));
           setTaskNote(task, 'ok', msg);
           showToast('✅ ' + msg, 'ok');
           addHistoryRecord({ filename: filename, path: filename, size: 0, type: meta && meta.type, quality: meta && meta.quality });
@@ -1898,7 +1957,7 @@
         if (t.cancelled) throw new Error('已取消');
         if (!res || !res.ok) throw new Error((res && res.error) || '合并失败');
         t.path = res.path;
-        setTaskStatus(t, 'done', '已完成');
+        setTaskStatus(t, 'done', T('done'));
         setTaskNote(t, 'ok', '已保存：' + (res.filename || meta.filename) + '（' + fmtSize(res.size) + '）');
         showToast('✅ 续传完成：' + (res.filename || meta.filename), 'ok');
         addHistoryRecord({ filename: res.filename || meta.filename, path: res.path, size: res.size, type: t.type, quality: '续传' });
@@ -1916,7 +1975,7 @@
         if (t.cancelled) throw new Error('已取消');
         if (!res || !res.ok) throw new Error((res && res.error) || '下载失败');
         t.path = res.path;
-        setTaskStatus(t, 'done', '已完成');
+        setTaskStatus(t, 'done', T('done'));
         setTaskNote(t, 'ok', '已保存：' + (res.filename || meta.filename) + '（' + fmtSize(res.size) + '）');
         showToast('✅ 续传完成：' + (res.filename || meta.filename), 'ok');
         addHistoryRecord({ filename: res.filename || meta.filename, path: res.path, size: res.size, type: t.type });
@@ -1959,7 +2018,7 @@
       items.forEach(function (rec) {
         var row = document.createElement('div');
         row.className = 'hist-item';
-        var name = rec.filename || rec.path || '未知文件';
+        var name = rec.filename || rec.path || 'Unknown';
         var p = rec.path || '';
         var sizeTxt = rec.size ? fmtSize(rec.size) : '';
         var timeTxt = rec.time ? new Date(rec.time).toLocaleString('zh-CN', { hour12: false }) : '';
@@ -1969,9 +2028,9 @@
         var acts = '';
         if (fileActionsAvailable() && hasFile) {
           acts =
-            '<button data-f="' + escAttr(p) + '" data-n="' + escAttr(name) + '" data-act="open">打开</button>' +
-            '<button data-f="' + escAttr(p) + '" data-n="' + escAttr(name) + '" data-act="folder">所在位置</button>' +
-            '<button class="danger" data-f="' + escAttr(p) + '" data-n="' + escAttr(name) + '" data-id="' + escAttr(rec.id) + '" data-act="del">删除文件</button>';
+            '<button data-f="' + escAttr(p) + '" data-n="' + escAttr(name) + '" data-act="open">' + T('open') + '</button>' +
+            '<button data-f="' + escAttr(p) + '" data-n="' + escAttr(name) + '" data-act="folder">' + T('location') + '</button>' +
+            '<button class="danger" data-f="' + escAttr(p) + '" data-n="' + escAttr(name) + '" data-id="' + escAttr(rec.id) + '" data-act="del">' + T('deleteFile') + '</button>';
         }
         row.innerHTML =
           '<div class="hist-row1"><span class="hist-icon">' + icon + '</span>' +
@@ -2002,6 +2061,7 @@
   }
 
   function openHistoryPanel() {
+    capturePrevView();
     historyPanel.hidden = false;
     if (mainContainer) mainContainer.hidden = true;
     if (settingsPanel) settingsPanel.hidden = true;
@@ -2183,14 +2243,25 @@
     if (runningCount < maxConcurrent) {
       t._running = true;
       runningCount++;
-      setTaskStatus(t, 'running', '下载中…');
+      setTaskStatus(t, 'running', T('downloading'));
       try { run(); } catch (e) { handleTaskError(t, e); }
     } else {
       t._running = false;
-      setTaskStatus(t, 'queued', '等待中（排队第 ' + (taskQueue.length + 1) + ' 位）');
-      setTaskNote(t, 'warn', '已达到同时下载数上限（' + maxConcurrent + '），自动排队等待');
+      setTaskStatus(t, 'queued', T('queuedN', taskQueue.length + 1));
+      setTaskNote(t, 'warn', T('maxConc', maxConcurrent));
       taskQueue.push(t);
     }
+  }
+  function refreshQueueOrder() {
+    // 队列中等待任务的排队序号随状态自动刷新（完成/取消/继续后重新编号）
+    if (!tasks) return;
+    var n = 0;
+    tasks.forEach(function (t) {
+      if (t.status === 'queued') {
+        n++;
+        setTaskStatus(t, 'queued', T('queuedN', n));
+      }
+    });
   }
   function pumpQueue() {
     while (runningCount < maxConcurrent && taskQueue.length) {
@@ -2198,10 +2269,11 @@
       if (t.cancelled) continue;   // 已被取消的任务不占槽位
       t._running = true;
       runningCount++;
-      setTaskStatus(t, 'running', '下载中…');
+      setTaskStatus(t, 'running', T('downloading'));
       setTaskNote(t, '', '');
       try { if (t._run) t._run(); } catch (e) { handleTaskError(t, e); }
     }
+    refreshQueueOrder();
   }
   function onTaskFinished(t) {
     var qi = taskQueue.indexOf(t);
@@ -2331,10 +2403,10 @@
       b.addEventListener('click', fn);
       wrap.appendChild(b);
     };
-    mk('预览', '', function () { openPreview(p); });
-    mk('打开', '', function () { actOpenFile(p); });
-    mk('所在位置', '', function () { actOpenFolder(p); });
-    mk('删除文件', 'danger', function () { actDeleteFile(p, null, function () { t.actionsEl.innerHTML = ''; }); });
+    mk(T('preview'), '', function () { openPreview(p); });
+    mk(T('open'), '', function () { actOpenFile(p); });
+    mk(T('location'), '', function () { actOpenFolder(p); });
+    mk(T('deleteFile'), 'danger', function () { actDeleteFile(p, null, function () { t.actionsEl.innerHTML = ''; }); });
     t.actionsEl.appendChild(wrap);
   }
 
@@ -2343,7 +2415,7 @@
     // 有续传数据且处于暂停（含重启恢复的待继续）时由「继续下载」按钮承接，隐藏重复的「继续」
     var resumeActive = !!(t._resumeMeta && t.status === 'paused');
     t.pauseEl.hidden = !(window.biliAPI && window.biliAPI.pauseDownload && t.token && t.phase !== 'merging' && ['running', 'paused'].indexOf(t.status) >= 0) || resumeActive;
-    t.pauseEl.textContent = t.status === 'paused' ? '继续' : '暂停';
+    t.pauseEl.textContent = t.status === 'paused' ? T('resume') : T('pause');
     t.retryEl.hidden = ['error', 'cancelled'].indexOf(t.status) < 0;
     // 跨重启/暂停任务：有续传数据且处于暂停（含重启恢复的待继续）时显示「继续下载」
     if (t.resumeEl) t.resumeEl.hidden = !resumeActive;
@@ -2390,11 +2462,12 @@
   /* ---------- v1.6：下载队列页（左下入口，布局参考悬浮窗） ---------- */
   function renderQueue() {
     if (!queueList) return;
+    refreshQueueOrder();
     queueList.innerHTML = '';
     if (!tasks.length) {
       var empty = document.createElement('div');
       empty.className = 'queue-empty';
-      empty.textContent = '暂无下载任务';
+      empty.textContent = T('emptyQueue');
       queueList.appendChild(empty);
       return;
     }
@@ -2406,8 +2479,8 @@
         '<span class="task-name"></span>' +
         '<span class="task-badge"></span>' +
         '<span class="task-status"></span>' +
-        '<button type="button" class="task-resume" hidden>继续下载</button>' +
-        '<button type="button" class="task-cancel">取消</button>' +
+        '<button type="button" class="task-resume" hidden>' + T('resumeDl') + '</button>' +
+        '<button type="button" class="task-cancel">' + T('cancel') + '</button>' +
         '</div>' +
         '<div class="task-bar" style="--p:0%"></div>' +
         '<div class="task-note"></div>';
@@ -2459,6 +2532,7 @@
     } catch (e) { }
   }
   function openQueuePanel() {
+    capturePrevView();
     queuePanel.hidden = false;
     if (mainContainer) mainContainer.hidden = true;
     if (historyPanel) historyPanel.hidden = true;
@@ -2508,7 +2582,7 @@
       target.setHours(Number(hm[0]), Number(hm[1]), 0, 0);
       if (target <= now) target.setDate(target.getDate() + 1);
       var waitMs = target - now;
-      setTaskStatus(t, 'waiting', '等待定时开始（' + timerInput.value + '）');
+      setTaskStatus(t, 'waiting', T('waiting', timerInput.value));
       setTaskNote(t, 'warn', '已设置定时 ' + timerInput.value + ' 开始下载');
       t.timer = setTimeout(function () { if (!t.cancelled) run(); }, waitMs);
     } else {
@@ -2579,7 +2653,7 @@
       if (!res || !res.ok) throw new Error(res && res.error || '下载失败');
       filename = res.filename || filename;
       task.path = res.path; task.savedFilename = filename;
-      setTaskStatus(task, 'done', '已完成');
+      setTaskStatus(task, 'done', T('done'));
       setTaskNote(task, 'ok', '已保存：' + filename + '（' + fmtSize(res.size) + '）');
       addHistoryRecord({ filename: filename, path: res.path, size: res.size, type: meta.type, quality: meta.quality });
       clearResumeState(task);
@@ -2595,12 +2669,12 @@
       if (d.aid) src.aid = d.aid;
     });
     return ensure.catch(function (e) {
-      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); setTaskNote(task, 'warn', T('taskCancelled')); return; }
       setTaskStatus(task, 'error', '获取视频信息失败');
       setTaskNote(task, 'fail', e && e.message ? e.message : '未知错误');
       throw e;
     }).then(function () {
-      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); return; }
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); return; }
       // 先等待高清能力探测完成，避免探测前的点击误走直链降级
       return waitMuxReady().then(function () { return downloadVideoInner(task); });
     });
@@ -2623,6 +2697,10 @@
       var dashPromise;
       if (dCached && dCached.videoUrl) {
         setTaskNote(task, 'warn', '使用缓存的 DASH 高清地址（' + dCached.qualityName + '）');
+        dCached.videoUrls = cdnRank(dCached.videoUrls || [dCached.videoUrl]);
+        dCached.audioUrls = cdnRank(dCached.audioUrls || (dCached.audioUrl ? [dCached.audioUrl] : []));
+        dCached.videoUrl = dCached.videoUrls[0];
+        if (dCached.audioUrls.length) dCached.audioUrl = dCached.audioUrls[0];
         dashPromise = Promise.resolve(dCached);
       } else {
         setTaskStatus(task, 'running', '正在获取高清下载地址…');
@@ -2644,8 +2722,11 @@
               pick.audio.backupUrl.forEach(function (b) { if (b && aUrls.indexOf(b) < 0) aUrls.push(b); });
             }
           }
+          // 主 CDN 优先（规避 mcdn 域名在某些网络下的 403）
+          vUrls = cdnRank(vUrls);
+          aUrls = cdnRank(aUrls);
           var entry = {
-            videoUrl: vUrl,
+            videoUrl: vUrls[0],
             videoUrls: vUrls,
             audioUrl: aUrl || '',
             audioUrls: aUrls,
@@ -2707,7 +2788,7 @@
           if (!res || !res.ok) throw new Error((res && res.error) || '合并失败');
           filename = res.filename || filename;
           task.path = res.path;
-          setTaskStatus(task, 'done', '已完成');
+          setTaskStatus(task, 'done', T('done'));
           setTaskNote(task, 'ok', '已保存：' + filename + '（' + fmtSize(res.size) + '）');
           showToast('✅ 下载完成：' + filename, 'ok');
           addHistoryRecord({ filename: filename, path: res.path, size: res.size, type: 'video', quality: entry.qualityName });
@@ -2728,6 +2809,8 @@
     var durlPromise;
     if (cached && cached.url) {
       setTaskNote(task, 'warn', '使用缓存的下载地址（' + cached.qualityName + '，' + new Date(cached.t).toLocaleTimeString() + ' 获取）');
+      cached.urls = cdnRank(cached.urls || [cached.url]);
+      cached.url = cached.urls[0];
       durlPromise = Promise.resolve(cached);
     } else {
       setTaskStatus(task, 'running', '正在获取下载地址…');
@@ -2753,6 +2836,8 @@
         if (durl[0].backup_url && durl[0].backup_url.length) {
           durl[0].backup_url.forEach(function (b) { if (b && urls.indexOf(b) < 0) urls.push(b); });
         }
+        urls = cdnRank(urls);
+        url = urls[0];
         var entry = {
           url: url,
           urls: urls,
@@ -2796,7 +2881,7 @@
         if (task.cancelled) throw new Error('已取消');
         setTaskStatus(task, 'done', '下载完成，正在保存…');
         saveBlob(res.blob, filename, task, { type: 'video', quality: gotName });
-        setTaskStatus(task, 'done', '已完成');
+        setTaskStatus(task, 'done', T('done'));
         setTaskNote(task, 'ok', '已保存：' + filename + '（' + (res.total / 1048576).toFixed(1) + ' MB）');
         showToast('✅ 下载完成：' + filename, 'ok');
         downloadExtras(task, filename, page2);
@@ -2854,12 +2939,12 @@
       if (d.aid) src.aid = d.aid;
     });
     return ensure.catch(function (e) {
-      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); setTaskNote(task, 'warn', '任务已取消'); return; }
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); setTaskNote(task, 'warn', T('taskCancelled')); return; }
       setTaskStatus(task, 'error', '获取视频信息失败');
       setTaskNote(task, 'fail', e && e.message ? e.message : '未知错误');
       throw e;
     }).then(function () {
-      if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); return; }
+      if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); return; }
       return downloadAudioInner(task);
     });
   }
@@ -2933,7 +3018,7 @@
           if (task.cancelled) throw new Error('已取消');
           setTaskStatus(task, 'done', '下载完成，正在保存…');
           saveBlob(res.blob, filenameM4a, task, { type: 'audio', quality: entry.bandwidthName });
-          setTaskStatus(task, 'done', '已完成');
+          setTaskStatus(task, 'done', T('done'));
           setTaskNote(task, 'ok', '已保存 M4A 音频：' + filenameM4a + '（' + (res.total / 1048576).toFixed(1) + ' MB）');
           showToast('✅ 音频下载完成：' + filenameM4a, 'ok');
         });
@@ -2966,7 +3051,7 @@
             }
             setTaskProgress(task, 1, '转码完成，正在保存…');
             saveBlob(mp3blob, filename, task, { type: 'audio', quality: aq + 'k' });
-            setTaskStatus(task, 'done', '已完成');
+            setTaskStatus(task, 'done', T('done'));
             setTaskNote(task, 'ok', '已保存 MP3：' + filename);
             showToast('✅ MP3 转码完成：' + filename, 'ok');
           });
@@ -2996,7 +3081,7 @@
 
   function handleTaskError(task, err) {
     console.warn('[哔哩下载器] 任务失败：', err);
-    if (task.cancelled) { setTaskStatus(task, 'cancelled', '已取消'); return; }
+    if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); return; }
     var msg = err && err.message ? err.message : '下载失败';
     if (/412|访问过于频繁|风控/i.test(msg)) {
       msg = 'B 站风控拦截了本次请求（HTTP 412）。代理已自动换新设备身份重试仍被拦截，通常是因为短时间请求过多，请稍等 1~2 分钟再试。';
@@ -3114,6 +3199,16 @@
   }
 
   function doLogin() {
+    if (IS_ANDROID && window.biliAPI && window.biliAPI.openBiliLogin) {
+      // 手机端：直接跳转哔哩哔哩登录页授权，登录成功自动保存 Cookie 并返回本软件
+      if (loginBtn.disabled) return;
+      loginBtn.disabled = true;
+      loginNote.textContent = '正在联动哔哩哔哩授权：请在哔哩哔哩 App（或网页扫码）完成登录授权，完成后将自动返回本软件并解锁更高清晰度…';
+      window.biliAPI.openBiliLogin();
+      // 页面已跳转，登录态由原生检测 SESSDATA 后回跳刷新
+      setTimeout(function () { loginBtn.disabled = false; }, 120000);
+      return;
+    }
     if (window.biliAPI && window.biliAPI.login) {
       if (loginBtn.disabled) return;
       loginBtn.disabled = true;
@@ -3301,7 +3396,28 @@
   })();
 
   // 设置面板
+  var prevView = 'main';   // 打开面板前所在界面（main/list/batch/detail），关闭后恢复
+  function capturePrevView() {
+    if (mainContainer && !mainContainer.hidden) prevView = 'main';
+    else if (listPanel && !listPanel.hidden) prevView = 'list';
+    else if (batchPanel && !batchPanel.hidden) prevView = 'batch';
+    else if (resultEl && !resultEl.hidden) prevView = 'detail';
+    else prevView = 'main';
+  }
+  function restorePrevView() {
+    if (prevView === 'list') {
+      if (listPanel) listPanel.hidden = false;
+      if (typeof renderListTable === 'function') renderListTable();
+    } else if (prevView === 'batch') {
+      if (batchPanel) batchPanel.hidden = false;
+    } else if (prevView === 'detail') {
+      if (resultEl) resultEl.hidden = false;
+    } else if (mainContainer) {
+      mainContainer.hidden = false;
+    }
+  }
   function openSettings() {
+    capturePrevView();
     settingsPanel.hidden = false;
     settingsMask.hidden = false;
     // 互斥：关闭其他面板（队列/历史/列表/批量/详情），保证从任意界面都能稳定打开设置
@@ -3320,14 +3436,21 @@
   function closeSettings() {
     settingsPanel.hidden = true;
     settingsMask.hidden = true;
+    // 关闭设置后恢复之前所在界面（主界面搜索框 / 列表 / 详情等）
+    restorePrevView();
   }
-  settingsBtn.addEventListener('click', openSettings);
+  // toggle：设置已打开时再次点击 → 收起并返回上一级
+  settingsBtn.addEventListener('click', function () {
+    if (settingsPanel && !settingsPanel.hidden) { closeSettings(); return; }
+    openSettings();
+  });
   settingsClose.addEventListener('click', closeSettings);
   settingsMask.addEventListener('click', closeSettings);
 
   /* ---------- v1.6.6：网络重置（被 B 站临时拉黑 / 清晰度降级时一键重置） ---------- */
   var netResetBtn = $('net-reset-btn');
   var netResetLogs = $('net-reset-logs');
+  if (netResetBtn && IS_ANDROID) { netResetBtn.hidden = true; if (netResetLogs) netResetLogs.hidden = true; }
   if (netResetBtn) netResetBtn.addEventListener('click', function () {
     if (!window.biliAPI || !window.biliAPI.netReset) {
       showToast('当前环境不支持一键网络重置（仅 Windows 客户端可用）', 'warn');
@@ -3397,17 +3520,30 @@
       drag0 = { sx: ev.clientX, sy: ev.clientY, lx: orb.offsetLeft, ly: orb.offsetTop };
       document.body.classList.add('no-select');
     });
-    document.addEventListener('mousemove', function (ev) {
+    var moveAt = function (x0, y0) {
       if (!drag0) return;
-      var x = drag0.lx + (ev.clientX - drag0.sx);
-      var y = drag0.ly + (ev.clientY - drag0.sy);
+      var x = drag0.lx + (x0 - drag0.sx);
+      var y = drag0.ly + (y0 - drag0.sy);
       x = Math.max(0, Math.min(window.innerWidth - 70, x));
       y = Math.max(0, Math.min(window.innerHeight - 70, y));
       orb.style.left = x + 'px';
       orb.style.top = y + 'px';
       orb.style.right = 'auto';
-    });
+    };
+    document.addEventListener('mousemove', function (ev) { moveAt(ev.clientX, ev.clientY); });
     document.addEventListener('mouseup', function () { drag0 = null; document.body.classList.remove('no-select'); });
+    orb.addEventListener('touchstart', function (ev) {
+      var t = ev.touches[0];
+      drag0 = { sx: t.clientX, sy: t.clientY, lx: orb.offsetLeft, ly: orb.offsetTop };
+      document.body.classList.add('no-select');
+    }, { passive: true });
+    document.addEventListener('touchmove', function (ev) {
+      if (!drag0) return;
+      ev.preventDefault();
+      var t = ev.touches[0];
+      moveAt(t.clientX, t.clientY);
+    }, { passive: false });
+    document.addEventListener('touchend', function () { drag0 = null; document.body.classList.remove('no-select'); });
     return orb;
   }
   function minimizeTasks() {
@@ -3426,27 +3562,43 @@
   (function () {
     var dragging = false, dx = 0, dy = 0;
     if (!tasksCard) return;
-    tasksCard.addEventListener('mousedown', function (ev) {
-      if (ev.target.closest && (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('select'))) return;
+    var dragStart = function (cx, cy) {
       dragging = true;
       var r = tasksCard.getBoundingClientRect();
-      dx = ev.clientX - r.left;
-      dy = ev.clientY - r.top;
+      dx = cx - r.left;
+      dy = cy - r.top;
       tasksCard.classList.add('dragging');
-      ev.preventDefault();
-    });
-    document.addEventListener('mousemove', function (ev) {
+    };
+    var dragMove = function (cx, cy) {
       if (!dragging) return;
-      var x = ev.clientX - dx;
-      var y = ev.clientY - dy;
+      var x = cx - dx;
+      var y = cy - dy;
       x = Math.max(0, Math.min(window.innerWidth - 160, x));
       y = Math.max(0, Math.min(window.innerHeight - 50, y));
       tasksCard.style.left = x + 'px';
       tasksCard.style.top = y + 'px';
       tasksCard.style.transform = 'none';
       tasksCard.style.right = 'auto';
+    };
+    tasksCard.addEventListener('mousedown', function (ev) {
+      if (ev.target.closest && (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('select'))) return;
+      dragStart(ev.clientX, ev.clientY);
+      ev.preventDefault();
     });
+    document.addEventListener('mousemove', function (ev) { dragMove(ev.clientX, ev.clientY); });
     document.addEventListener('mouseup', function () { dragging = false; if (tasksCard) tasksCard.classList.remove('dragging'); });
+    tasksCard.addEventListener('touchstart', function (ev) {
+      if (ev.target.closest && (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('select'))) return;
+      var t = ev.touches[0];
+      dragStart(t.clientX, t.clientY);
+    }, { passive: true });
+    document.addEventListener('touchmove', function (ev) {
+      if (!dragging) return;
+      ev.preventDefault();
+      var t = ev.touches[0];
+      dragMove(t.clientX, t.clientY);
+    }, { passive: false });
+    document.addEventListener('touchend', function () { dragging = false; if (tasksCard) tasksCard.classList.remove('dragging'); });
   })();
   // 新建任务时若处于最小化小球状态，自动展开悬浮窗
   var _origCreateTask = createTask;
@@ -3460,15 +3612,21 @@
   };
 
   /* ---------- 下载队列页 + 主菜单 ---------- */
-  if (queueBtn) queueBtn.addEventListener('click', openQueuePanel);
+  if (queueBtn) queueBtn.addEventListener('click', function () {
+    if (queuePanel && !queuePanel.hidden) { closeQueuePanel(); restorePrevView(); return; }
+    openQueuePanel();
+  });
   bindPager();
-  if (queueBack) queueBack.addEventListener('click', closeQueuePanel);
+  if (queueBack) queueBack.addEventListener('click', function () { closeQueuePanel(); restorePrevView(); });
   if (queueCancelAll) queueCancelAll.addEventListener('click', cancelAllTasks);
   if (railHomeBtn) railHomeBtn.addEventListener('click', goHome);
 
   /* ---------- 下载记录页 ---------- */
-  historyBtn.addEventListener('click', openHistoryPanel);
-  historyBack.addEventListener('click', closeHistoryPanel);
+  historyBtn.addEventListener('click', function () {
+    if (historyPanel && !historyPanel.hidden) { closeHistoryPanel(); restorePrevView(); return; }
+    openHistoryPanel();
+  });
+  historyBack.addEventListener('click', function () { closeHistoryPanel(); restorePrevView(); });
   if (tasksClearDone) {
     tasksClearDone.addEventListener('click', function () {
       var done = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) >= 0; });
@@ -3505,20 +3663,109 @@
 
   /* ---------- v1.2：主题 / 语言 / 限速 / 缓存锁定（优化10 · 功能11 · 功能14） ---------- */
   var I18N = {
-    zh: { appTitle: '哔哩下载器 · Dom', download: '下载', video: '视频', audio: '音频', settings: '设置', history: '下载记录', threads: '线程数', quality: '清晰度', codec: '编码', format: '封装', clip: '片段', timer: '定时', extras: '附带', export: '导出信息', all: '下载全部 P / 集' },
-    en: { appTitle: 'Bili Downloader · Dom', download: 'Download', video: 'Video', audio: 'Audio', settings: 'Settings', history: 'History', threads: 'Threads', quality: 'Quality', codec: 'Codec', format: 'Container', clip: 'Clip', timer: 'Timer', extras: 'Extras', export: 'Export Info', all: 'Download All P' }
+    zh: {
+      appTitle: '哔哩下载器 · Dom', subTitle: '粘贴 B 站链接，一键下载视频 / 音频', searchPh: '粘贴 B 站链接 / BV 号，或输入关键词直接搜索',
+      search: '🔍 搜索', clear: '清空', home: '🏠 主菜单', lite: '精简版', full: '完全版',
+      video: '视频', audio: '音频', quality: '清晰度', codec: '编码', format: '封装', threads: '线程数', clip: '片段', timer: '定时', extras: '附带',
+      export: '导出信息', download: '下载', thTitle: '标题', thViews: '播放量', thDanmaku: '弹幕', thDuration: '时长',
+      settings: '设置', tutorial: '使用教程', update: '版本与更新', support: '支持作者', history: '下载记录', queue: '下载队列', batch: '批量下载',
+      downloading: '下载中…', done: '已完成', cancelled: '已取消', paused: '已暂停', failed: '下载失败', taskCancelled: '任务已取消', waiting: '等待定时开始（%s）',
+      queuedN: '等待中（排队第 %s 位）', maxConc: '已达到同时下载数上限（%s），自动排队等待',
+      pause: '暂停', resume: '继续', cancel: '取消', retry: '重试', resumeDl: '继续下载',
+      preview: '预览', open: '打开', location: '所在位置', deleteFile: '删除文件',
+      clearDone: '清除已完成', selectAll: '全选', unselectAll: '全不选', dlSelected: '一键下载勾选（%s）',
+      interruptAll: '中断/取消全部', continueAll: '继续全部', emptyQueue: '暂无下载任务', emptyHistory: '暂无下载记录', clearHistory: '清空历史',
+      audioFmt: '格式', mp3q: 'MP3 音质',
+      qnLabels: { '116': '1080P60', '80': '1080P 高清', '64': '720P 高清', '32': '480P', '16': '360P', '6': '240P' },
+      encLabels: { auto: '自动（兼容优先 · 推荐）', h264: 'H.264（最兼容）', h265: 'H.265（高压缩）', av1: 'AV1（最高压缩）' },
+      fmtLabels: { mp4: 'MP4（通用兼容）', mkv: 'MKV（保留全部音轨/字幕）' },
+      afLabels: { m4a: 'M4A（原版无损 · 最高品质）', mp3: 'MP3（浏览器内转码）' },
+      aqLabels: { '128': '128 Kbps（良）', '192': '192 Kbps（优 · 推荐）', '320': '320 Kbps（极优）' },
+      pageLabels: { '20': '20 个 / 页', '30': '30 个 / 页（默认）', '50': '50 个 / 页', '100': '100 个 / 页' }
+    },
+    en: {
+      appTitle: 'Bili Downloader · Dom', subTitle: 'Paste a Bilibili link, download videos / audio', searchPh: 'Paste a Bilibili link / BV ID, or type keywords to search',
+      search: '🔍 Search', clear: 'Clear', home: '🏠 Home', lite: 'Lite', full: 'Full',
+      video: 'Video', audio: 'Audio', quality: 'Quality', codec: 'Codec', format: 'Container', threads: 'Threads', clip: 'Clip', timer: 'Timer', extras: 'Extras',
+      export: 'Export Info', download: 'Download', thTitle: 'Title', thViews: 'Views', thDanmaku: 'Danmaku', thDuration: 'Duration',
+      settings: 'Settings', tutorial: 'Tutorial', update: 'Version & Updates', support: 'Support Author', history: 'History', queue: 'Queue', batch: 'Batch Download',
+      downloading: 'Downloading…', done: 'Done', cancelled: 'Cancelled', paused: 'Paused', failed: 'Failed', taskCancelled: 'Task cancelled', waiting: 'Scheduled (%s)',
+      queuedN: 'Queued (#%s)', maxConc: 'Max concurrent reached (%s), queued',
+      pause: 'Pause', resume: 'Resume', cancel: 'Cancel', retry: 'Retry', resumeDl: 'Resume',
+      preview: 'Preview', open: 'Open', location: 'Open Folder', deleteFile: 'Delete File',
+      clearDone: 'Clear Done', selectAll: 'Select All', unselectAll: 'Unselect All', dlSelected: 'Download Selected (%s)',
+      interruptAll: 'Stop All', continueAll: 'Resume All', emptyQueue: 'No tasks', emptyHistory: 'No history', clearHistory: 'Clear History',
+      audioFmt: 'Format', mp3q: 'MP3 Quality',
+      qnLabels: { '116': '1080P60', '80': '1080P HD', '64': '720P HD', '32': '480P', '16': '360P', '6': '240P' },
+      encLabels: { auto: 'Auto (Compatible)', h264: 'H.264', h265: 'H.265', av1: 'AV1' },
+      fmtLabels: { mp4: 'MP4', mkv: 'MKV' },
+      afLabels: { m4a: 'M4A (Original)', mp3: 'MP3 (Converted)' },
+      aqLabels: { '128': '128 Kbps (Good)', '192': '192 Kbps (Best)', '320': '320 Kbps (Excellent)' },
+      pageLabels: { '20': '20 / page', '30': '30 / page (default)', '50': '50 / page', '100': '100 / page' }
+    }
   };
-  var I18N_KEYS = { 'app-title': 'appTitle', 'dl-btn-text': 'download', 'type-seg': null };
+  var curLang = 'zh';
+  function T(k, a1, a2) {
+    var d = I18N[curLang] || I18N.zh;
+    var s = d[k] !== undefined ? d[k] : (I18N.zh[k] !== undefined ? I18N.zh[k] : k);
+    if (a1 !== undefined) s = String(s).replace('%s', a1);
+    if (a2 !== undefined) s = String(s).replace('%s', a2);
+    return s;
+  }
+  // 语言切换后重建内置下拉选项文字（保留选中值）
+  function rebuildSelectTexts() {
+    var map = function (sel, labels) {
+      if (!sel) return;
+      var prev = sel.value;
+      Array.prototype.forEach.call(sel.options, function (o) {
+        if (labels && labels[o.value]) o.textContent = labels[o.value];
+      });
+      sel.value = prev;
+    };
+    map(qnSelect, I18N[curLang].qnLabels || I18N.zh.qnLabels);
+    map(encSelect, I18N[curLang].encLabels || I18N.zh.encLabels);
+    map(fmtSelect, I18N[curLang].fmtLabels || I18N.zh.fmtLabels);
+    map(afSelect, I18N[curLang].afLabels || I18N.zh.afLabels);
+    map(aqSelect, I18N[curLang].aqLabels || I18N.zh.aqLabels);
+    if (searchPageSizeSelect) {
+      var pv = searchPageSizeSelect.value;
+      Array.prototype.forEach.call(searchPageSizeSelect.options, function (o) {
+        var lbl = (I18N[curLang].pageLabels || I18N.zh.pageLabels)[o.value];
+        if (lbl) o.textContent = lbl;
+      });
+      searchPageSizeSelect.value = pv;
+    }
+    if (threadSelect) {
+      var tv = threadSelect.value;
+      Array.prototype.forEach.call(threadSelect.options, function (o) {
+        o.textContent = curLang === 'en' ? (o.value + ' threads') : (o.value + ' 线程');
+      });
+      threadSelect.value = tv;
+    }
+  }
   function applyLang(lang) {
-    var d = I18N[lang] || I18N.zh;
-    var t = $('app-title');
-    if (t) t.textContent = d.appTitle;
+    curLang = I18N[lang] ? lang : 'zh';
+    var d = I18N[curLang];
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+      var k = el.getAttribute('data-i18n');
+      if (k && d[k] !== undefined) el.textContent = d[k];
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(function (el) {
+      var k = el.getAttribute('data-i18n-placeholder');
+      if (k && d[k] !== undefined) el.setAttribute('placeholder', d[k]);
+    });
+    rebuildSelectTexts();
     document.title = d.appTitle;
-    if (dlBtnText) dlBtnText.textContent = d.download;
-    try { localStorage.setItem('bili_lang', lang); } catch (e) { }
-    showToast('语言已切换：' + (lang === 'en' ? 'English' : '中文'), 'ok');
+    try { localStorage.setItem('bili_lang', curLang); } catch (e) { }
+    // 重渲染当前可见的动态区域，让状态/按钮文案跟随语言
+    if (tasks && tasks.length) renderTasks();
+    if (queuePanel && !queuePanel.hidden) renderQueue();
+    if (historyPanel && !historyPanel.hidden) renderHistory();
+    if (listPanel && !listPanel.hidden) renderListTable();
+    showToast('语言已切换：' + (curLang === 'en' ? 'English' : '中文'), 'ok');
   }
   var dlBtnText = $('dl-btn-text');
+  if (dlBtnText) dlBtnText.textContent = T('download');
   function loadPrefs() {
     try {
       var th = localStorage.getItem('bili_theme');
@@ -3537,8 +3784,33 @@
       if (fm && fmtSelect) fmtSelect.value = fm;
       var th2 = localStorage.getItem('bili_theme');
       if (th2 && themeSelect) { themeSelect.value = th2; applyTheme(th2); }
-      else applyTheme('system');
+      else applyTheme(currentThemeMode());
+      if (themeToggleBtn) updateThemeToggleUI(currentThemeMode());
     } catch (e) { }
+  }
+  // 主页面外观切换按钮（太阳=浅色，月亮=深色，点击切换形态并变色）
+  var themeToggleBtn = $('theme-toggle-btn');
+  function currentThemeMode() {
+    var th = null;
+    try { th = localStorage.getItem('bili_theme'); } catch (e) { }
+    if (th === 'light' || th === 'dark') return th;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  function updateThemeToggleUI(mode) {
+    if (!themeToggleBtn) return;
+    var dark = mode === 'dark';
+    themeToggleBtn.textContent = dark ? '🌙' : '☀️';
+    themeToggleBtn.classList.toggle('active', dark);
+    themeToggleBtn.title = dark ? '切换外观（当前深色）' : '切换外观（当前浅色）';
+  }
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', function () {
+      var next = currentThemeMode() === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem('bili_theme', next); } catch (e) { }
+      updateThemeToggleUI(next);
+      showToast(next === 'dark' ? '🌙 已切换深色外观' : '☀️ 已切换浅色外观', 'ok');
+    });
   }
   function applyTheme(mode) {
     var m = mode || 'system';
@@ -4078,7 +4350,7 @@
       threads: threadSelect ? threadSelect.value : '',
       fmt: fmtSelect ? fmtSelect.value : '',
       lang: langSelect ? langSelect.value : '',
-      theme: themeSelect ? themeSelect.value : '',
+      theme: currentThemeMode(),
       rateKbps: rateLimitInput ? rateLimitInput.value : '',
       cacheLock: cacheLock ? cacheLock.checked : false
     };
@@ -4098,7 +4370,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.6';
+  var APP_VERSION = '1.6.7';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -4189,7 +4461,7 @@
         if (threadSelect && s.threads) threadSelect.value = s.threads;
         if (fmtSelect && s.fmt) { fmtSelect.value = s.fmt; try { localStorage.setItem('bili_fmt', s.fmt); } catch (e) { } }
         if (langSelect && s.lang) { langSelect.value = s.lang; applyLang(s.lang); }
-        if (themeSelect && s.theme) { themeSelect.value = s.theme; document.documentElement.setAttribute('data-theme', s.theme); try { localStorage.setItem('bili_theme', s.theme); } catch (e) { } }
+        if (s.theme) { applyTheme(s.theme); try { localStorage.setItem('bili_theme', s.theme); } catch (e) { } if (themeToggleBtn) updateThemeToggleUI(s.theme); }
         if (rateLimitInput && s.rateKbps) {
           rateLimitInput.value = s.rateKbps;
           try { localStorage.setItem('bili_rate_kbps', s.rateKbps); } catch (e) { }
@@ -4319,12 +4591,16 @@
       return;
     }
     if (window.biliAPI && window.biliAPI.getDownloadDir) {
-      window.biliAPI.getDownloadDir().then(function (dir) {
+      var d = window.biliAPI.getDownloadDir();
+      var render = function (dir) {
         dlDirPath.textContent = dir || '（未设置）';
         dlDirPath.title = dir || '';
-      }).catch(function () {
-        dlDirPath.textContent = '（读取失败）';
-      });
+      };
+      if (d && typeof d.then === 'function') {
+        d.then(render).catch(function () { dlDirPath.textContent = '（读取失败）'; });
+      } else {
+        render(d);
+      }
     } else {
       dlDirPath.textContent = '（浏览器默认下载目录）';
       if (dlDirPick) dlDirPick.hidden = true;
@@ -4333,6 +4609,24 @@
     }
   }
   function pickDlDir() {
+    if (IS_ANDROID && window.biliAPI && window.biliAPI.chooseDownloadDir) {
+      // Android：原生 SAF 目录选择（回调式）
+      var cb = 'dir' + (++androidCbSeq);
+      window.__dlCbs = window.__dlCbs || {};
+      window.__dlCbs[cb] = {
+        onDone: function (ok, msg) {
+          delete window.__dlCbs[cb];
+          if (ok === true) {
+            refreshDlDir();
+            showToast('✅ 下载目录已更改：' + (msg || ''), 'ok');
+          } else {
+            showToast(msg && msg.indexOf('取消') < 0 ? ('选择目录失败：' + msg) : '已取消选择', msg && msg.indexOf('取消') < 0 ? 'fail' : 'warn');
+          }
+        }
+      };
+      window.biliAPI.chooseDownloadDir(cb);
+      return;
+    }
     if (!window.biliAPI || !window.biliAPI.chooseDownloadDir) return;
     window.biliAPI.chooseDownloadDir().then(function (dir) {
       if (dir) {

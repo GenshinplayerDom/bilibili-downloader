@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data: blob:; connect-src 'self' https: http://127.0.0.1:* http://127.0.0.2:* http://127.0.0.3:* http://localhost:*; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data: blob:; connect-src 'self' https: http://127.0.0.1:* http://127.0.0.2:* http://127.0.0.3:* http://localhost:*; media-src 'self' blob: http: https:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>哔哩下载器 · GenshinplayerDom</title>
 <link rel="stylesheet" href="styles.css">
@@ -15,11 +15,11 @@
 <header class="site-header">
   <div class="logo">▶</div>
   <div class="header-text">
-    <h1>哔哩下载器</h1>
-    <p>粘贴 B 站链接，一键下载视频 / 音频</p>
+    <h1 id="app-title" data-i18n="appTitle">哔哩下载器</h1>
+    <p data-i18n="subTitle">粘贴 B 站链接，一键下载视频 / 音频</p>
   </div>
   <div class="header-right">
-    <button type="button" class="home-btn" id="home-btn" title="返回主菜单（保留本次下载历史）">🏠 主菜单</button>
+    <button type="button" class="home-btn" id="home-btn" data-i18n="home" title="返回主菜单（保留本次下载历史）">🏠 主菜单</button>
     <span class="login-badge" id="login-badge">未登录</span>
     <span class="mini-status" id="mini-status" title="代理状态">
       <i class="proxy-dot" id="proxy-dot"></i><span id="proxy-state">检测中…</span>
@@ -31,16 +31,16 @@
 
   <!-- UI 模式切换（精简版 / 完全版） -->
   <div class="ui-switch" id="ui-switch" title="切换界面模式">
-    <button type="button" class="ui-switch-btn" data-mode="lite">精简版</button>
-    <button type="button" class="ui-switch-btn active" data-mode="full">完全版</button>
+    <button type="button" class="ui-switch-btn" data-mode="lite" data-i18n="lite">精简版</button>
+    <button type="button" class="ui-switch-btn active" data-mode="full" data-i18n="full">完全版</button>
   </div>
 
   <!-- 主操作区（中间偏上） -->
   <section class="card finder-card">
     <div class="input-wrap" id="finder">
       <input type="text" id="url-input" placeholder="粘贴 B 站链接 / BV 号，或输入关键词直接搜索" autocomplete="off" spellcheck="false">
-      <button type="button" id="search-btn" title="按关键词搜索（输入框内容非链接时）">🔍 搜索</button>
-      <button type="button" id="clear-btn" hidden>清空</button>
+      <button type="button" id="search-btn" data-i18n="search" title="按关键词搜索（输入框内容非链接时）">🔍 搜索</button>
+      <button type="button" id="clear-btn" data-i18n="clear" hidden>清空</button>
     </div>
     <div class="finder-status" id="finder-status"></div>
   </section>
@@ -79,11 +79,11 @@
       </div>
 
       <div class="opt-row" id="opt-video">
-        <label>清晰度</label>
+        <label data-i18n="quality">清晰度</label>
         <select id="qn-select"></select>
       </div>
       <div class="opt-row lite-hide" id="opt-enc">
-        <label>编码</label>
+        <label data-i18n="codec">编码</label>
         <select id="enc-select">
           <option value="auto" selected>自动（兼容优先 · 推荐）</option>
           <option value="h264">H.264（最兼容）</option>
@@ -92,7 +92,7 @@
         </select>
       </div>
       <div class="opt-row lite-hide" id="opt-format">
-        <label>封装</label>
+        <label data-i18n="format">封装</label>
         <select id="fmt-select">
           <option value="mp4" selected>MP4（通用兼容）</option>
           <option value="mkv">MKV（保留全部音轨/字幕）</option>
@@ -114,7 +114,7 @@
         </select>
       </div>
       <div class="opt-row" id="opt-thread">
-        <label>线程数</label>
+        <label data-i18n="threads">线程数</label>
         <select id="thread-select">
           <option value="4">4 线程（保守）</option>
           <option value="6">6 线程</option>
@@ -126,18 +126,18 @@
         </select>
       </div>
       <div class="opt-row lite-hide" id="opt-clip">
-        <label>片段</label>
+        <label data-i18n="clip">片段</label>
         <input type="text" id="clip-input" placeholder="可选：起始-结束，如 00:30-01:15（秒 / 分:秒）">
       </div>
       <div class="opt-row lite-hide" id="opt-timer">
-        <label>定时</label>
+        <label data-i18n="timer">定时</label>
         <span class="opt-inline">
           <input type="time" id="timer-input" value="">
           <label class="checkbox-label"><input type="checkbox" id="timer-check"> 定时开始</label>
         </span>
       </div>
       <div class="opt-row lite-hide" id="opt-extra">
-        <label>附带</label>
+        <label data-i18n="extras">附带</label>
         <span class="opt-inline">
           <label class="checkbox-label"><input type="checkbox" id="extra-danmaku"> 弹幕 XML</label>
           <label class="checkbox-label"><input type="checkbox" id="extra-sub"> 字幕 SRT</label>
@@ -172,6 +172,7 @@
 
 <!-- 左下角竖向操作栏（记录 + 设置） -->
 <div class="left-rail">
+  <button type="button" class="rail-btn theme-toggle" id="theme-toggle-btn" title="切换外观（浅色 / 深色）">☀️</button>
   <button type="button" class="rail-btn alt" id="rail-home-btn" title="主菜单（返回初始主界面，保留下载任务）">🏠</button>
   <button type="button" class="rail-btn alt" id="queue-btn" title="下载队列">📥</button>
   <button type="button" class="rail-btn" id="history-btn" title="下载记录">🕘</button>
@@ -225,11 +226,11 @@
       </div>
     </div>
     <div class="opt-row" id="batch-opt-video">
-      <label>清晰度</label>
+      <label data-i18n="quality">清晰度</label>
       <select id="batch-qn"></select>
     </div>
     <div class="opt-row lite-hide" id="batch-opt-enc">
-      <label>编码</label>
+      <label data-i18n="codec">编码</label>
       <select id="batch-enc">
         <option value="auto" selected>自动（兼容优先）</option>
         <option value="h264">H.264（最兼容）</option>
@@ -238,7 +239,7 @@
       </select>
     </div>
     <div class="opt-row lite-hide" id="batch-opt-format">
-      <label>封装</label>
+      <label data-i18n="format">封装</label>
       <select id="batch-fmt">
         <option value="mp4" selected>MP4（通用兼容）</option>
         <option value="mkv">MKV（保留全部音轨/字幕）</option>
@@ -260,7 +261,7 @@
       </select>
     </div>
     <div class="opt-row">
-      <label>线程数</label>
+      <label data-i18n="threads">线程数</label>
       <select id="batch-thread">
         <option value="4">4 线程（保守）</option>
         <option value="6">6 线程</option>
@@ -297,11 +298,11 @@
   </div>
   <div class="list-options">
     <div class="opt-row" id="list-opt-video">
-      <label>清晰度</label>
+      <label data-i18n="quality">清晰度</label>
       <select id="list-qn"></select>
     </div>
     <div class="opt-row lite-hide" id="list-opt-enc">
-      <label>编码</label>
+      <label data-i18n="codec">编码</label>
       <select id="list-enc">
         <option value="auto" selected>自动（兼容优先）</option>
         <option value="h264">H.264（最兼容）</option>
@@ -310,7 +311,7 @@
       </select>
     </div>
     <div class="opt-row lite-hide" id="list-opt-format">
-      <label>封装</label>
+      <label data-i18n="format">封装</label>
       <select id="list-fmt">
         <option value="mp4" selected>MP4（通用兼容）</option>
         <option value="mkv">MKV（保留全部音轨/字幕）</option>
@@ -332,7 +333,7 @@
       </select>
     </div>
     <div class="opt-row">
-      <label>线程数</label>
+      <label data-i18n="threads">线程数</label>
       <select id="list-thread">
         <option value="4">4 线程（保守）</option>
         <option value="6">6 线程</option>
@@ -350,9 +351,9 @@
         <tr>
           <th class="col-check"></th>
           <th class="col-cover"></th>
-          <th class="col-title">标题</th>
+          <th class="col-title" data-i18n="thTitle">标题</th>
           <th class="col-play">播放量</th>
-          <th class="col-danmaku">弹幕</th>
+          <th class="col-danmaku" data-i18n="thDanmaku">弹幕</th>
           <th class="col-dur">时长</th>
         </tr>
       </thead>
@@ -373,7 +374,7 @@
 <!-- 左侧竖向设置侧边栏 -->
 <aside class="settings-panel" id="settings-panel" hidden>
   <div class="settings-head">
-    <h2>设置</h2>
+    <h2 data-i18n="settings">设置</h2>
     <button type="button" class="icon-btn" id="settings-close" title="关闭">✕</button>
   </div>
 
@@ -473,14 +474,6 @@
         </select>
       </div>
       <div class="set-row">
-        <span class="set-label">外观</span>
-        <select id="theme-select" style="width:130px">
-          <option value="system" selected>跟随系统</option>
-          <option value="light">浅色</option>
-          <option value="dark">深色</option>
-        </select>
-      </div>
-      <div class="set-row">
         <button type="button" class="set-btn" id="set-export">导出设置</button>
         <button type="button" class="set-btn" id="set-import">导入设置</button>
       </div>
@@ -525,7 +518,7 @@
 
     <!-- 使用教程 -->
     <section class="set-section">
-      <h3>使用教程</h3>
+      <h3 data-i18n="tutorial">使用教程</h3>
       <ol class="tutorial">
         <li><b>提取</b>：粘贴 B 站视频链接 / BV 号 / av 号 / 番剧链接，自动识别并显示视频信息。</li>
         <li><b>下载视频</b>：选择清晰度与线程数，点击「下载」。未登录通常仅 360P~480P，登录后可解锁更高清晰度。</li>
@@ -540,7 +533,7 @@
 
     <!-- 版本更新 -->
     <section class="set-section" id="update-section">
-      <h3>版本与更新</h3>
+      <h3 data-i18n="update">版本与更新</h3>
       <div class="set-row">
         <span class="set-label">当前版本</span>
         <span class="set-value" id="app-version">v1.5.0</span>
@@ -572,7 +565,7 @@
 
     <!-- 支持作者 -->
     <section class="set-section">
-      <h3>支持作者</h3>
+      <h3 data-i18n="support">支持作者</h3>
       <div class="set-note">本软件完全免费开源。如果您觉得好用，可以请作者喝杯奶茶，您的支持便是我最大的动力 ❤</div>
       <button type="button" class="set-btn primary" id="support-btn">❤ 支持作者</button>
     </section>

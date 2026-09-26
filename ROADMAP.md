@@ -2,6 +2,10 @@
 
 本表替代此前“全部实施”的笼统声明，以代码实际能力为准。
 
+## v1.6.7 已完成
+- 修复无法在线播放（根因：CSP `media-src` 仅允许 `'self' blob:`，外部视频流（代理流 / CDN 直链）被浏览器 URL 安全检查拒绝）。已放行 `http: https:`，实测播放器正常加载（readyState 4 / 可播放 / 时长完整）。
+- 下载地址收集时 CDN 排序增强（主域优先，规避部分网络下 mcdn 域名 403）。
+
 ## v1.6.6 已完成
 - 在线播放深度修复：代理 /stream 跟随 CDN 302 重定向（避免 <video> 跳到无 Referer 直链被防盗链 403）、Content-Type 兜底（m4s 强制 video/mp4）、主进程 webRequest 给 bilivideo/hdslb/acgvideo 请求自动注入 Referer + UA；播放失败自动降级链（1080P DASH → 1080P MP4 → 720P DASH → 720P MP4），并显示明确错误提示。
 - 设置页「网络重置」：一键执行刷新 DNS、释放 / 重新获取 IP、重置 Winsock 与 IP 堆栈（管理员授权），用于修复被 B 站临时拉黑导致的清晰度降级 / 下载限速。
