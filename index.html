@@ -160,7 +160,9 @@
 
 <!-- 下载任务（独立于主界面，覆盖面板打开时仍可见） -->
 <section class="card tasks-card" id="tasks-card" hidden>
-  <div class="tasks-title">下载任务 <span class="tasks-sub">本次使用期间保留</span>
+  <div class="tasks-title">
+    <button type="button" class="icon-btn task-min" id="task-min-btn" title="最小化为小球">×</button>
+    下载任务 <span class="tasks-sub">本次使用期间保留</span>
     <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
     <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
   </div>
@@ -169,6 +171,8 @@
 
 <!-- 左下角竖向操作栏（记录 + 设置） -->
 <div class="left-rail">
+  <button type="button" class="rail-btn alt" id="rail-home-btn" title="主菜单（返回初始主界面，保留下载任务）">🏠</button>
+  <button type="button" class="rail-btn alt" id="queue-btn" title="下载队列">📥</button>
   <button type="button" class="rail-btn" id="history-btn" title="下载记录">🕘</button>
   <button type="button" class="rail-btn" id="settings-btn" title="设置">⚙</button>
 </div>
@@ -185,6 +189,19 @@
   <div class="history-sub">历史下载记录（持久保存，可打开 / 定位 / 删除文件）</div>
   <div class="history-list" id="history-list"></div>
   <div class="history-empty" id="history-empty" hidden>暂无下载记录</div>
+</section>
+
+<!-- 下载队列页（替换主界面，布局参考悬浮窗） -->
+<section class="queue-panel" id="queue-panel" hidden>
+  <div class="queue-head">
+    <h2>下载队列</h2>
+    <div class="queue-head-actions">
+      <button type="button" class="mini-btn danger" id="queue-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
+      <button type="button" class="icon-btn" id="queue-back" title="返回上一级">←</button>
+    </div>
+  </div>
+  <div class="queue-sub">当前下载任务（本次使用期间保留，可取消）</div>
+  <div class="queue-list" id="queue-list"></div>
 </section>
 
 <!-- 批量下载页（替换主界面） -->

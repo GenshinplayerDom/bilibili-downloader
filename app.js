@@ -70,6 +70,13 @@
   var tasksCard = $('tasks-card');
   var tasksList = $('tasks-list');
   var tasksClearDone = $('tasks-clear-done');
+  var taskMinBtn = $('task-min-btn');
+  var queueBtn = $('queue-btn');
+  var queuePanel = $('queue-panel');
+  var queueList = $('queue-list');
+  var queueBack = $('queue-back');
+  var queueCancelAll = $('queue-cancel-all');
+  var railHomeBtn = $('rail-home-btn');
   // v1.2 新增
   var fmtSelect = $('fmt-select');
   var clipInput = $('clip-input');
@@ -320,6 +327,10 @@
   }
 
   /* ---------- API ---------- */
+  /** 封面 URL 统一为 https（处理 http: 与协议相对 // 两种格式，避免 file:// 解析失败） */
+  function fixCover(u) {
+    return (u || '').replace(/^\/\//, 'https://').replace(/^http:/i, 'https:');
+  }
   function apiGet(url) {
     var doDirect = function () {
       return fetch(url, { credentials: 'omit' }).then(function (res) {
@@ -538,7 +549,7 @@
           aid: data.aid,
           cid: data.cid,
           title: data.title,
-          pic: (data.pic || '').replace(/^http:/i, 'https:'),
+          pic: fixCover(data.pic),
           up: data.owner ? data.owner.name : '',
           duration: data.duration || 0,
           stat: data.stat || {},
@@ -570,7 +581,7 @@
       kind: 'bangumi',
       seasonId: data.season_id,
       title: data.title || data.season_title || '',
-      pic: ((episodes[0] && episodes[0].pic) || data.pic || '').replace(/^http:/i, 'https:'),
+      pic: fixCover((episodes[0] && episodes[0].pic) || data.pic),
       up: data.up_info ? data.up_info.name : '',
       duration: (episodes[0] && episodes[0].duration) || 0,
       stat: data.stat || {},
@@ -616,7 +627,7 @@
     $('v-up').textContent = current.up;
     $('v-duration').textContent = fmtDur(current.duration);
     var cover = $('v-cover');
-    cover.src = current.pic;
+    cover.src = fixCover(current.pic);
     cover.onerror = function () { cover.style.visibility = 'hidden'; };
     var stat = current.stat || {};
     var deg = !!current.degraded;
@@ -693,7 +704,7 @@
       var archives = (d.archives || []).filter(function (a) { return a && a.bvid; });
       if (!archives.length) throw new Error('该合集暂无视频');
       var medias = archives.map(function (a) {
-        return { bvid: a.bvid, aid: a.aid, title: a.title, duration: a.duration || 0, pic: a.pic || '', stat: a.stat || {} };
+        return { bvid: a.bvid, aid: a.aid, title: a.title, duration: a.duration || 0, pic: fixCover(a.pic), stat: a.stat || {} };
       });
       return { title: meta.title || ('合集 ' + sid), medias: medias, author: meta.upper ? meta.upper.name : '', total: d.page ? d.page.total : medias.length };
     });
@@ -721,7 +732,7 @@
       return {
         bvid: m.bvid, aid: m.aid, cid: m.cid || 0,
         title: m.title || ('视频 ' + (i + 1)), duration: m.duration || 0,
-        pic: (m.pic || '').replace(/^http:/i, 'https:'),
+        pic: fixCover(m.pic),
         stat: m.stat || {}, page: i + 1
       };
     });
@@ -840,7 +851,7 @@
     };
     if (!item.cid || !item.pic || !item.title) {
       viewByVideo({ bvid: item.bvid, aid: item.aid }).then(function (v) {
-        if (v) { d.title = v.title || d.title; d.pic = (v.pic || d.pic).replace(/^http:/i, 'https:'); d.duration = v.duration || d.duration; d.stat = v.stat || d.stat; d.owner = v.owner || null; d.cid = v.cid || d.cid; if (v.pages && v.pages.length) d.pages = v.pages; }
+        if (v) { d.title = v.title || d.title; d.pic = fixCover(v.pic || d.pic); d.duration = v.duration || d.duration; d.stat = v.stat || d.stat; d.owner = v.owner || null; d.cid = v.cid || d.cid; if (v.pages && v.pages.length) d.pages = v.pages; }
         finishDetail(d, item);
       }).catch(function () { finishDetail(d, item); });
     } else {
@@ -1023,7 +1034,7 @@
       var items = results.map(function (r) {
         return {
           bvid: r.bvid || '', aid: r.aid || null,
-          pic: r.pic || '', title: cleanSearchTitle(r.title) || (r.title || ''),
+          pic: fixCover(r.pic), title: cleanSearchTitle(r.title) || (r.title || ''),
           duration: r.duration ? fmtDuration(r.duration) : '',
           stat: { view: Number(r.play) || 0, danmaku: Number(r.video_review) || 0 },
           author: r.author || '', fromSearch: true, searchRank: r.rank || 0
@@ -2111,7 +2122,9 @@
       if (tasksCancelAll) tasksCancelAll.hidden = alive.length === 0;
       if (batchCancelAll) batchCancelAll.hidden = alive.length === 0;
       if (listCancelAll) listCancelAll.hidden = alive.length === 0;
+      if (queueCancelAll) queueCancelAll.hidden = alive.length === 0;
     }
+    syncQueueRow(t);
   }
   function setTaskProgress(t, frac, text, speed) {
     if (t.cancelled || t.status === 'paused') return;
@@ -2123,10 +2136,96 @@
       }
       t.statusEl.textContent = text;
     }
+    syncQueueRow(t);
   }
   function setTaskNote(t, cls, text) {
     t.noteEl.className = 'task-note' + (cls ? ' ' + cls : '');
     t.noteEl.textContent = text || '';
+    syncQueueRow(t);
+  }
+
+  /* ---------- v1.6：下载队列页（左下入口，布局参考悬浮窗） ---------- */
+  function renderQueue() {
+    if (!queueList) return;
+    queueList.innerHTML = '';
+    if (!tasks.length) {
+      var empty = document.createElement('div');
+      empty.className = 'queue-empty';
+      empty.textContent = '暂无下载任务';
+      queueList.appendChild(empty);
+      return;
+    }
+    tasks.forEach(function (t) {
+      var row = document.createElement('div');
+      row.className = 'task-card' + (t.status === 'done' ? ' task-done' : '');
+      row.innerHTML =
+        '<div class="task-head">' +
+        '<span class="task-name"></span>' +
+        '<span class="task-badge"></span>' +
+        '<span class="task-status"></span>' +
+        '<button type="button" class="task-cancel">取消</button>' +
+        '</div>' +
+        '<div class="task-bar" style="--p:0%"></div>' +
+        '<div class="task-note"></div>';
+      row.querySelector('.task-name').textContent = t.name;
+      row.querySelector('.task-badge').textContent = t.badge;
+      var st = row.querySelector('.task-status');
+      st.textContent = t.statusEl ? t.statusEl.textContent : t.status;
+      st.className = 'task-status' + (t.status === 'done' ? ' done' : t.status === 'error' ? ' error' : t.status === 'cancelled' ? ' cancelled' : '');
+      var bar = row.querySelector('.task-bar');
+      if (t.barEl) bar.style.setProperty('--p', t.barEl.style.getPropertyValue('--p'));
+      var note = row.querySelector('.task-note');
+      if (t.noteEl && t.noteEl.textContent) {
+        note.className = 'task-note' + (t.noteEl.className.indexOf('ok') >= 0 ? ' ok' : t.noteEl.className.indexOf('fail') >= 0 ? ' fail' : t.noteEl.className.indexOf('warn') >= 0 ? ' warn' : '');
+        note.textContent = t.noteEl.textContent;
+      }
+      t._q = { status: st, bar: bar, note: note };
+      var cancel = row.querySelector('.task-cancel');
+      if (['running', 'paused', 'waiting', 'queued'].indexOf(t.status) < 0) cancel.hidden = true;
+      cancel.addEventListener('click', function () {
+        if (t.timer) clearTimeout(t.timer);
+        t.cancelled = true;
+        if (t.cancelFn) t.cancelFn();
+        setTaskStatus(t, 'cancelled', '已取消');
+        setTaskNote(t, 'warn', '任务已取消');
+        saveResumeState(t);
+      });
+      queueList.appendChild(row);
+    });
+    if (queueCancelAll) {
+      var alive = tasks.filter(function (x) { return ['done', 'error', 'cancelled'].indexOf(x.status) < 0; });
+      queueCancelAll.hidden = alive.length === 0;
+    }
+  }
+  function syncQueueRow(t) {
+    if (!t || !t._q) return;
+    try {
+      if (t._q.status) {
+        t._q.status.textContent = t.statusEl ? t.statusEl.textContent : t.status;
+        t._q.status.className = 'task-status' + (t.status === 'done' ? ' done' : t.status === 'error' ? ' error' : t.status === 'cancelled' ? ' cancelled' : '');
+      }
+      if (t._q.bar && t.barEl) t._q.bar.style.setProperty('--p', t.barEl.style.getPropertyValue('--p'));
+      if (t._q.note && t.noteEl) {
+        t._q.note.className = 'task-note' + (t.noteEl.className.indexOf('ok') >= 0 ? ' ok' : t.noteEl.className.indexOf('fail') >= 0 ? ' fail' : t.noteEl.className.indexOf('warn') >= 0 ? ' warn' : '');
+        t._q.note.textContent = t.noteEl.textContent;
+      }
+    } catch (e) { }
+  }
+  function openQueuePanel() {
+    queuePanel.hidden = false;
+    if (mainContainer) mainContainer.hidden = true;
+    if (historyPanel) historyPanel.hidden = true;
+    if (settingsPanel) settingsPanel.hidden = true;
+    if (settingsMask) settingsMask.hidden = true;
+    if (listPanel) listPanel.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    document.body.classList.remove('overlay-active');
+    renderQueue();
+  }
+  function closeQueuePanel() {
+    queuePanel.hidden = true;
+    if (mainContainer) mainContainer.hidden = false;
   }
 
   /* ---------- 下载执行（多任务并发） ---------- */
@@ -2960,12 +3059,97 @@
   settingsBtn.addEventListener('click', openSettings);
   settingsClose.addEventListener('click', closeSettings);
   settingsMask.addEventListener('click', closeSettings);
-  // ESC 关闭设置面板 / 记录页
+  // ESC 关闭设置面板 / 记录页 / 下载队列
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !settingsPanel.hidden) closeSettings();
     if (e.key === 'Escape' && !historyPanel.hidden) closeHistoryPanel();
     if (e.key === 'Escape' && !batchPanel.hidden) closeBatchPanel();
+    if (e.key === 'Escape' && queuePanel && !queuePanel.hidden) closeQueuePanel();
   });
+
+  /* ---------- v1.6：悬浮窗可拖动 + 最小化小球 ---------- */
+  var orb = null;
+  function ensureOrb() {
+    if (orb) return orb;
+    orb = document.createElement('div');
+    orb.className = 'task-orb';
+    orb.title = '点击展开下载任务';
+    orb.addEventListener('click', function () { expandTasks(); });
+    document.body.appendChild(orb);
+    var drag0 = null;
+    orb.addEventListener('mousedown', function (ev) {
+      ev.preventDefault();
+      drag0 = { sx: ev.clientX, sy: ev.clientY, lx: orb.offsetLeft, ly: orb.offsetTop };
+      document.body.classList.add('no-select');
+    });
+    document.addEventListener('mousemove', function (ev) {
+      if (!drag0) return;
+      var x = drag0.lx + (ev.clientX - drag0.sx);
+      var y = drag0.ly + (ev.clientY - drag0.sy);
+      x = Math.max(0, Math.min(window.innerWidth - 70, x));
+      y = Math.max(0, Math.min(window.innerHeight - 70, y));
+      orb.style.left = x + 'px';
+      orb.style.top = y + 'px';
+      orb.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', function () { drag0 = null; document.body.classList.remove('no-select'); });
+    return orb;
+  }
+  function minimizeTasks() {
+    if (!tasksCard) return;
+    tasksCard.hidden = true;
+    var o = ensureOrb();
+    o.textContent = '📥 ' + tasks.length;
+    o.style.visibility = 'visible';
+  }
+  function expandTasks() {
+    if (tasksCard) tasksCard.hidden = false;
+    if (orb) orb.style.visibility = 'hidden';
+  }
+  if (taskMinBtn) taskMinBtn.addEventListener('click', minimizeTasks);
+  // 悬浮窗拖动（标题栏，排除按钮）
+  (function () {
+    var dragging = false, dx = 0, dy = 0;
+    var titleEl = document.querySelector('.tasks-title');
+    if (!titleEl) return;
+    titleEl.addEventListener('mousedown', function (ev) {
+      if (ev.target.closest && ev.target.closest('button')) return;
+      dragging = true;
+      var r = tasksCard.getBoundingClientRect();
+      dx = ev.clientX - r.left;
+      dy = ev.clientY - r.top;
+      tasksCard.classList.add('dragging');
+      ev.preventDefault();
+    });
+    document.addEventListener('mousemove', function (ev) {
+      if (!dragging) return;
+      var x = ev.clientX - dx;
+      var y = ev.clientY - dy;
+      x = Math.max(0, Math.min(window.innerWidth - 160, x));
+      y = Math.max(0, Math.min(window.innerHeight - 50, y));
+      tasksCard.style.left = x + 'px';
+      tasksCard.style.top = y + 'px';
+      tasksCard.style.transform = 'none';
+      tasksCard.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', function () { dragging = false; if (tasksCard) tasksCard.classList.remove('dragging'); });
+  })();
+  // 新建任务时若处于最小化小球状态，自动展开悬浮窗
+  var _origCreateTask = createTask;
+  createTask = function (name, badge) {
+    var t = _origCreateTask(name, badge);
+    if (orb && orb.style.visibility !== 'hidden') {
+      expandTasks();
+      if (orb) orb.style.visibility = 'hidden';
+    }
+    return t;
+  };
+
+  /* ---------- 下载队列页 + 主菜单 ---------- */
+  if (queueBtn) queueBtn.addEventListener('click', openQueuePanel);
+  if (queueBack) queueBack.addEventListener('click', closeQueuePanel);
+  if (queueCancelAll) queueCancelAll.addEventListener('click', cancelAllTasks);
+  if (railHomeBtn) railHomeBtn.addEventListener('click', goHome);
 
   /* ---------- 下载记录页 ---------- */
   historyBtn.addEventListener('click', openHistoryPanel);
@@ -3589,7 +3773,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.5.0';
+  var APP_VERSION = '1.6.0';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

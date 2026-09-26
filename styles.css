@@ -28,6 +28,7 @@ html[data-theme="dark"] .card,
 html[data-theme="dark"] .set-section,
 html[data-theme="dark"] .task-item,
 html[data-theme="dark"] .history-panel,
+html[data-theme="dark"] .queue-panel,
 html[data-theme="dark"] .settings-panel,
 html[data-theme="dark"] .toast { background: var(--card); border-color: var(--line); color: var(--text); }
 html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] button,
@@ -158,6 +159,81 @@ body {
   color: var(--muted);
   font-size: 14px;
 }
+
+/* ---------- 下载队列页（布局参考悬浮窗） ---------- */
+.queue-panel {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 8px;
+}
+.queue-head h2 { margin: 0; font-size: 18px; color: var(--ink); }
+.queue-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.queue-head .icon-btn { margin-left: 0; }
+.queue-sub {
+  padding: 0 16px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.queue-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ---------- 悬浮窗拖动 ---------- */
+body.overlay-active .tasks-card { cursor: grab; }
+body.overlay-active .tasks-card.dragging { cursor: grabbing; user-select: none; }
+.tasks-title { cursor: grab; }
+.tasks-title:active { cursor: grabbing; }
+.tasks-title .task-min { margin-left: 0; }
+
+/* ---------- 最小化小球 ---------- */
+.task-orb {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 90;
+  min-width: 56px;
+  height: 56px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 28px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: grab;
+  box-shadow: 0 6px 20px rgba(251, 114, 153, 0.45);
+  user-select: none;
+}
+.task-orb:active { cursor: grabbing; }
+body.no-select { user-select: none; }
+
 .hist-item {
   background: #fff;
   border: 1px solid var(--line);
