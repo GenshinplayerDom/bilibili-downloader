@@ -343,6 +343,21 @@ body.no-select { user-select: none; }
   background: #fafbfc;
 }
 #url-input:focus { border-color: var(--brand); background: #fff; }
+#search-btn {
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 8px rgba(251, 114, 153, 0.3);
+}
+#search-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(251, 114, 153, 0.4); }
+#search-btn:active { transform: translateY(0); }
 #clear-btn {
   padding: 0 12px;
   border: 1px solid var(--line);

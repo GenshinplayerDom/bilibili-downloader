@@ -975,12 +975,14 @@
       if (q[0] === 64 && !miss) o.selected = true;
       qnSelect.appendChild(o);
     });
-    if (aq) {
-      var cur = qnSelect.querySelector('option[value="' + prev + '"]');
-      if (cur && cur.disabled) {
-        var ok = qnSelect.querySelector('option:not([disabled])');
-        if (ok) qnSelect.value = ok.value;
-      }
+    // 保留用户已选清晰度：异步探测完成时不得重置用户选择（避免高清被误降为 480P）
+    // 即使探测认为该档受限，也保留选中值，下载时以 B 站实际返回为准（受限时提示但不强制降级）
+    var cur = qnSelect.querySelector('option[value="' + prev + '"]');
+    if (cur) {
+      qnSelect.value = prev;
+    } else if (aq) {
+      var ok = qnSelect.querySelector('option:not([disabled])');
+      if (ok) qnSelect.value = ok.value;
     }
   }
 
@@ -1639,8 +1641,9 @@
     delete map[t._resumeMeta.key];
     resumeSave(map);
   }
-  /** 从持久化元信息重建续传任务（不依赖当前页面解析状态） */
-  function resumeStoredTask(meta) {
+  /** 从持久化元信息重建续传任务（不依赖当前页面解析状态）
+   *  autoStart=false：仅恢复为「待继续」入队（重启恢复场景，不自动下载） */
+  function resumeStoredTask(meta, autoStart) {
     var t = createTask(meta.name || meta.filename || '未完成任务', meta.badge || '续传');
     t.type = meta.type || 'video';
     t.settings = meta.settings || { threads: 8, format: 'mp4', af: 'm4a', aq: 192 };
@@ -1652,6 +1655,12 @@
       if (window.biliAPI && window.biliAPI.muxCancel) window.biliAPI.muxCancel(t.token);
       if (window.biliAPI && window.biliAPI.streamCancel) window.biliAPI.streamCancel(t.token);
     };
+    if (autoStart === false) {
+      // 重启恢复：仅入队待继续，用户点击「继续下载」才恢复
+      setTaskStatus(t, 'paused', '待继续（上次未完成）');
+      setTaskNote(t, 'warn', '上次退出时任务未完成，点击「继续下载」恢复');
+      return t;
+    }
     setTaskStatus(t, 'running', '继续下载剩余分片…');
     setTaskNote(t, 'warn', '已检测到未完成分片，正在续传（跨重启）');
     if (meta.kind === 'mux' && window.biliAPI && window.biliAPI.muxDownload) {
@@ -1712,8 +1721,18 @@
     keys.forEach(function (k) {
       var meta = map[k];
       if (!meta || !meta.filename) return;
-      try { resumeStoredTask(meta); } catch (e) { }
+      try { resumeStoredTask(meta, false); } catch (e) { }
     });
+  }
+  /** 退出软件前保存未完成 / 已暂停任务（重启后转入下载队列待继续） */
+  function savePendingOnExit() {
+    tasks.forEach(function (t) {
+      if (['done', 'error', 'cancelled'].indexOf(t.status) >= 0) return;
+      try { saveResumeState(t); } catch (e) { }
+    });
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', savePendingOnExit);
   }
 
   function renderHistory() {
@@ -1969,22 +1988,32 @@
     if (t._running) { t._running = false; if (runningCount > 0) runningCount--; }
     pumpQueue();
   }
+  /** 取消即删除进程：停止下载、移除任务卡、清除续传状态（不保留「继续下载」） */
+  function removeTaskProcess(t) {
+    if (!t) return;
+    if (t.timer) clearTimeout(t.timer);
+    t.cancelled = true;
+    if (t.cancelFn) { try { t.cancelFn(); } catch (e) { } }
+    clearResumeState(t);
+    if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
+    var i = tasks.indexOf(t);
+    if (i >= 0) tasks.splice(i, 1);
+    tasksCard.hidden = tasks.length === 0;
+    renderQueue();
+  }
   function cancelAllTasks() {
     var count = 0;
-    tasks.forEach(function (t) {
+    var alive0 = tasks.slice();
+    alive0.forEach(function (t) {
       if (['done', 'error', 'cancelled'].indexOf(t.status) >= 0) return;
       count++;
-      t.cancelled = true;
-      if (t.timer) clearTimeout(t.timer);
-      if (t.cancelFn) { try { t.cancelFn(); } catch (e) { } }
-      setTaskStatus(t, 'cancelled', '已取消');
-      setTaskNote(t, 'warn', '任务已取消');
-      saveResumeState(t);
+      removeTaskProcess(t);
     });
     var alive = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
     if (tasksCancelAll) tasksCancelAll.hidden = alive.length === 0;
     if (batchCancelAll) batchCancelAll.hidden = alive.length === 0;
     if (listCancelAll) listCancelAll.hidden = alive.length === 0;
+    if (queueCancelAll) queueCancelAll.hidden = alive.length === 0;
     showToast(count ? ('已取消 ' + count + ' 个下载任务') : '当前没有进行中的下载任务', count ? 'warn' : 'ok');
   }
 
@@ -2026,28 +2055,17 @@
     t.actionsEl = card.querySelector('.task-actions');
     t.resumeDirs = {}; t.resumeDir = null; t._resumeMeta = null; t.resumeEl = null;
     card.querySelector('.task-cancel').addEventListener('click', function () {
-      if (['running', 'paused', 'waiting'].indexOf(t.status) < 0) return;
-      if (t.timer) clearTimeout(t.timer);
-      t.cancelled = true;
-      if (t.cancelFn) t.cancelFn();
-      setTaskStatus(t, 'cancelled', '已取消');
-      setTaskNote(t, 'warn', '任务已取消');
-      saveResumeState(t);
+      if (['running', 'paused', 'waiting', 'queued'].indexOf(t.status) < 0) return;
+      removeTaskProcess(t);
     });
     t.pauseEl = card.querySelector('.task-pause');
     t.retryEl = card.querySelector('.task-retry');
     t.resumeEl = card.querySelector('.task-resume');
     if (t.resumeEl) t.resumeEl.addEventListener('click', function () {
       if (!t._resumeMeta) { showToast('该任务无可用续传数据', 'warn'); return; }
-      t.cancelled = false; t._ended = false; t.path = null;
-      if (t.actionsEl) t.actionsEl.innerHTML = '';
-      var nt = resumeStoredTask(t._resumeMeta);
-      // 新任务承接原任务信息并移除旧卡片
-      if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
-      var idx = tasks.indexOf(t); if (idx >= 0) tasks.splice(idx, 1);
-      tasks.push(nt);
-      if (nt.el) tasksCard.appendChild(nt.el);
-      tasksCard.hidden = false;
+      var meta = t._resumeMeta;
+      removeTaskProcess(t);
+      resumeStoredTask(meta);
     });
     t.pauseEl.addEventListener('click', function () {
       var paused = t.status === 'paused';
@@ -2057,6 +2075,7 @@
         if (result.ok && ['running', 'paused'].indexOf(t.status) >= 0) {
           setTaskStatus(t, paused ? 'running' : 'paused', paused ? '继续下载中…' : '已暂停');
           setTaskNote(t, 'warn', paused ? '继续下载剩余分片' : '已完成分片保留，点击继续下载');
+          if (paused) { try { saveResumeState(t); } catch (e) { } }
         }
       }).catch(function (error) { showToast(error.message, 'fail'); }).finally(function () { t.pauseEl.disabled = false; });
     });
@@ -2103,7 +2122,8 @@
     t.pauseEl.hidden = !(window.biliAPI && window.biliAPI.pauseDownload && t.token && t.phase !== 'merging' && ['running', 'paused'].indexOf(t.status) >= 0);
     t.pauseEl.textContent = t.status === 'paused' ? '继续' : '暂停';
     t.retryEl.hidden = ['error', 'cancelled'].indexOf(t.status) < 0;
-    if (t.resumeEl) t.resumeEl.hidden = !(t._resumeMeta && t.status === 'cancelled');
+    // 跨重启/暂停任务：有续传数据且处于暂停（含重启恢复的待继续）时显示「继续下载」
+    if (t.resumeEl) t.resumeEl.hidden = !(t._resumeMeta && t.status === 'paused');
     t.el.querySelector('.task-cancel').hidden = ['done', 'error', 'cancelled'].indexOf(t.status) >= 0;
   }
   function setTaskStatus(t, status, text) {
@@ -2163,6 +2183,7 @@
         '<span class="task-name"></span>' +
         '<span class="task-badge"></span>' +
         '<span class="task-status"></span>' +
+        '<button type="button" class="task-resume" hidden>继续下载</button>' +
         '<button type="button" class="task-cancel">取消</button>' +
         '</div>' +
         '<div class="task-bar" style="--p:0%"></div>' +
@@ -2183,12 +2204,15 @@
       var cancel = row.querySelector('.task-cancel');
       if (['running', 'paused', 'waiting', 'queued'].indexOf(t.status) < 0) cancel.hidden = true;
       cancel.addEventListener('click', function () {
-        if (t.timer) clearTimeout(t.timer);
-        t.cancelled = true;
-        if (t.cancelFn) t.cancelFn();
-        setTaskStatus(t, 'cancelled', '已取消');
-        setTaskNote(t, 'warn', '任务已取消');
-        saveResumeState(t);
+        removeTaskProcess(t);
+      });
+      // 队列「继续下载」：暂停 / 重启待继续任务一键恢复
+      var resume = row.querySelector('.task-resume');
+      resume.hidden = !(t._resumeMeta && t.status === 'paused');
+      resume.addEventListener('click', function () {
+        if (!t._resumeMeta) { showToast('该任务无可用续传数据', 'warn'); return; }
+        removeTaskProcess(t);
+        resumeStoredTask(t._resumeMeta);
       });
       queueList.appendChild(row);
     });
@@ -2981,7 +3005,13 @@
   inputEl.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && inputEl.value.trim()) {
       clearTimeout(debounceTimer);
-      startParse(inputEl.value.trim());
+      var v = inputEl.value.trim();
+      // 链接形态 → 解析；关键词 → 直接搜索（修复关键词回车无响应）
+      if (/^(https?:)?\/\//i.test(v) || /^BV[0-9A-Za-z]{10}/i.test(v) || /^(av|ss|ep)\d+/i.test(v) || /space\.bilibili\.com/i.test(v)) {
+        startParse(v);
+      } else {
+        doSearch(v);
+      }
     }
   });
   clearBtn.addEventListener('click', function () {
@@ -3522,6 +3552,7 @@
     if (historyPanel) historyPanel.hidden = true;
     if (settingsPanel) settingsPanel.hidden = true;
     if (settingsMask) settingsMask.hidden = true;
+    if (queuePanel) queuePanel.hidden = true;
     if (resultEl) resultEl.hidden = true;
     if (mainContainer) mainContainer.hidden = false;
     listState = null;
@@ -3531,7 +3562,7 @@
     setFinderState('idle');
     setStatus('', '');
     tasksCard.hidden = tasks.length === 0;
-    showToast('已返回主菜单（本次下载历史已保留）', 'ok');
+    showToast('已返回主菜单', 'ok');
   }
   if (homeBtn) homeBtn.addEventListener('click', goHome);
 
@@ -3773,7 +3804,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.0';
+  var APP_VERSION = '1.6.1';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
