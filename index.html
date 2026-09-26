@@ -31,8 +31,8 @@
 
   <!-- UI 模式切换（精简版 / 完全版） -->
   <div class="ui-switch" id="ui-switch" title="切换界面模式">
-    <button type="button" class="ui-switch-btn" data-mode="lite">精简版（老版 UI）</button>
-    <button type="button" class="ui-switch-btn active" data-mode="full">完全版（当前）</button>
+    <button type="button" class="ui-switch-btn" data-mode="lite">精简版</button>
+    <button type="button" class="ui-switch-btn active" data-mode="full">完全版</button>
   </div>
 
   <!-- 主操作区（中间偏上） -->
@@ -358,6 +358,14 @@
       <tbody id="list-tbody"></tbody>
     </table>
   </div>
+  <div class="list-pager" id="list-pager" hidden>
+    <button type="button" class="mini-btn" id="pager-prev">‹ 上一页</button>
+    <span class="pager-pages" id="pager-pages"></span>
+    <button type="button" class="mini-btn" id="pager-next">下一页 ›</button>
+    <span class="pager-jump">跳至 <input type="number" id="pager-input" min="1" value="1"> 页
+      <button type="button" class="mini-btn" id="pager-go">GO</button>
+    </span>
+  </div>
   <div class="list-empty" id="list-empty" hidden>暂无可下载的视频</div>
 </section>
 
@@ -431,6 +439,15 @@
       </div>
       <div class="set-row">
         <label class="checkbox-label"><input type="checkbox" id="cache-lock"> 锁定下载地址缓存（永不过期）</label>
+      </div>
+      <div class="set-row">
+        <span class="set-label">搜索每页数量</span>
+        <select id="search-page-size" style="width:130px">
+          <option value="20">20 个 / 页</option>
+          <option value="30" selected>30 个 / 页（默认）</option>
+          <option value="50">50 个 / 页</option>
+          <option value="100">100 个 / 页</option>
+        </select>
       </div>
       <div class="set-row">
         <span class="set-label">同时下载数上限</span>

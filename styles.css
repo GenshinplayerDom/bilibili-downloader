@@ -100,7 +100,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 80;
+  z-index: 110;
 }
 .rail-btn {
   width: 42px; height: 42px;
@@ -1000,6 +1000,26 @@ body.no-select { user-select: none; }
 .list-table input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 .list-cover { width: 82px; height: 48px; object-fit: cover; border-radius: 6px; background: #eee; display: block; }
 .list-title-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 8px;
+  flex-wrap: wrap;
+}
+.pager-pages { display: flex; gap: 4px; align-items: center; }
+.pager-page-btn {
+  min-width: 30px; height: 28px;
+  border: 1px solid var(--line, #e3e6ee);
+  border-radius: 6px;
+  background: #fff; color: var(--text, #333);
+  font-size: 12.5px; cursor: pointer;
+}
+.pager-page-btn:hover { border-color: var(--brand, #fb7299); color: var(--brand, #fb7299); }
+.pager-page-btn.active { background: var(--brand, #fb7299); border-color: var(--brand, #fb7299); color: #fff; }
+.pager-jump { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted, #888); }
+.pager-jump input { width: 52px; height: 26px; border: 1px solid var(--line, #e3e6ee); border-radius: 6px; padding: 0 6px; font-size: 12.5px; }
 .list-empty { padding: 30px; text-align: center; color: var(--muted, #888); }
 .list-detail-back { margin-left: 10px; }
 

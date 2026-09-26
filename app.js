@@ -116,6 +116,7 @@
   var listCheckAll = $('list-check-all');
   var listUncheckAll = $('list-uncheck-all');
   var listDlSelected = $('list-dl-selected');
+  var listPager = $('list-pager');
   var listTypeSeg = $('list-type-seg');
   var listCancelAll = $('list-cancel-all');
   var listQn = $('list-qn');
@@ -212,6 +213,8 @@
     return String(n);
   }
   function fmtDur(sec) {
+    // 搜索接口时长可能是 "mm:ss" / "h:mm:ss" 字符串，直接透传
+    if (typeof sec === 'string' && /^\d{1,3}(:\d{1,2}){1,2}$/.test(sec.trim())) return sec.trim();
     sec = Number(sec) || 0;
     var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = Math.floor(sec % 60);
     function p(v) { return v < 10 ? '0' + v : String(v); }
@@ -331,7 +334,8 @@
   function fixCover(u) {
     return (u || '').replace(/^\/\//, 'https://').replace(/^http:/i, 'https:');
   }
-  function apiGet(url) {
+  function apiGet(url, opts) {
+    var prefer = opts && opts.preferProxy;
     var doDirect = function () {
       return fetch(url, { credentials: 'omit' }).then(function (res) {
         if (res.status === 412) throw new Error('B 站风控拒绝了直连请求（HTTP 412）。请使用代理重试');
@@ -352,9 +356,11 @@
     };
 
     var p;
-    if (useProxy && proxyMode() !== 'custom') {
-      p = (proxyAlive === true ? Promise.resolve(true) : checkProxy()).then(function (alive) {
+    if (prefer || (useProxy && proxyMode() !== 'custom')) {
+      // preferProxy（高清地址等关键请求）：始终优先走代理（代理转发带登录 Cookie 可解锁更高清晰度），失败再直连兜底
+      p = (prefer || proxyAlive === true ? Promise.resolve(proxyAlive === true) : checkProxy()).then(function (alive) {
         if (alive) return doProxy();
+        if (prefer) return doProxy().catch(function () { return doDirect(); });
         // auto：本机代理不可达 → 尝试自定义地址 → 最后直连兜底
         var c = customProxyBase();
         if (proxyMode() === 'auto' && c) {
@@ -391,7 +397,7 @@
   function viewByVideo(q) {
     var p = q.bvid ? 'bvid=' + encodeURIComponent(q.bvid) : 'aid=' + encodeURIComponent(q.aid);
     var url = 'https://api.bilibili.com/x/web-interface/view?' + p;
-    return apiGet(url).then(function (data) {
+    return apiGet(url, { preferProxy: true }).then(function (data) {
       return data;
     }, function (err) {
       if (/412|风控|拦截/i.test(err && err.message || '')) {
@@ -495,6 +501,8 @@
   /* ---------- 主流程 ---------- */
   function startParse(text) {
     if (busy) return;
+    // 新链接解析：清空上一个视频残留的片段选择
+    if (clipInput) clipInput.value = '';
     var parsed = parseLink(text);
     if (!parsed) {
       setFinderState('error');
@@ -690,7 +698,12 @@
       var mu = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/series/recArchivesBySeason?season_id=' + sid);
       return fetch(mu, { credentials: 'include' }).then(function (r) { return r.json(); }).then(function (j) {
         if (j && j.code && j.code !== 0) throw new Error('读取合集失败：' + (j.message || j.code));
-        var list = (j && j.data && j.data.archives) || [];
+        var list = ((j && j.data && j.data.archives) || []).map(function (a) {
+          return {
+            bvid: a.bvid, aid: a.aid, cid: a.cid || 0, title: a.title, duration: a.duration || 0, pic: fixCover(a.cover || a.pic),
+            stat: a.stat || { view: a.play || 0, danmaku: a.danmaku || 0 }
+          };
+        });
         if (!list.length) throw new Error('该合集暂无视频');
         return { title: (j.data && j.data.meta && j.data.meta.name) || ('合集 ' + sid), medias: list };
       });
@@ -704,7 +717,10 @@
       var archives = (d.archives || []).filter(function (a) { return a && a.bvid; });
       if (!archives.length) throw new Error('该合集暂无视频');
       var medias = archives.map(function (a) {
-        return { bvid: a.bvid, aid: a.aid, title: a.title, duration: a.duration || 0, pic: fixCover(a.pic), stat: a.stat || {} };
+        return {
+          bvid: a.bvid, aid: a.aid, cid: a.cid || 0, title: a.title, duration: a.duration || 0, pic: fixCover(a.pic),
+          stat: a.stat || { view: a.play || 0, danmaku: a.danmaku || 0 }
+        };
       });
       return { title: meta.title || ('合集 ' + sid), medias: medias, author: meta.upper ? meta.upper.name : '', total: d.page ? d.page.total : medias.length };
     });
@@ -717,7 +733,16 @@
     return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
       if (j && j.code && j.code !== 0) throw new Error('读取收藏夹失败：' + (j.message || j.code));
       var d = (j && j.data) || {};
-      var medias = d.medias || [];
+      var medias = (d.medias || []).map(function (m) {
+        // fav/resource/list 返回 cover（非 pic）与 cnt_info（非 stat）
+        var ci = m.cnt_info || {};
+        return {
+          bvid: m.bvid, aid: m.id || m.aid, cid: m.cid || 0,
+          title: m.title || '', duration: m.duration || 0,
+          pic: fixCover(m.cover || m.pic),
+          stat: { view: ci.play || 0, danmaku: ci.danmaku || 0, like: ci.thumb_up || 0, reply: 0 }
+        };
+      });
       if (!medias.length) throw new Error('该收藏夹暂无视频');
       return { title: d.info ? d.info.title : ('收藏夹 ' + fid), medias: medias };
     });
@@ -727,8 +752,8 @@
   }
 
   /* ---------- v1.4：合集/收藏夹视频表格列表 ---------- */
-  function openListPanel(title, kind, medias) {
-    var items = (medias || []).slice(0, 50).map(function (m, i) {
+  function openListPanel(title, kind, medias, searchKw) {
+    var items = (medias || []).slice(0, 200).map(function (m, i) {
       return {
         bvid: m.bvid, aid: m.aid, cid: m.cid || 0,
         title: m.title || ('视频 ' + (i + 1)), duration: m.duration || 0,
@@ -736,7 +761,7 @@
         stat: m.stat || {}, page: i + 1
       };
     });
-    listState = { title: title, kind: kind, items: items, checked: {}, backTo: null };
+    listState = { title: title, kind: kind, items: items, checked: {}, backTo: null, searchKw: searchKw || '' };
     // 同步当前全局下载偏好到列表面板（清晰度/线程/编码/封装/音频格式）
     if (listQn) {
       listQn.innerHTML = qnSelect.innerHTML;
@@ -1014,38 +1039,109 @@
     return viaProxy().catch(function () { return viaDirect(); });
   }
 
-  function doSearch(keyword) {
+  /* 搜索分页：每页数量可在设置页调整（默认 30）；页码按钮 + 输入跳页 */
+  var searchState = { kw: '', page: 1, pageSize: 30, total: 0 };
+  function searchPageSize() {
+    var n = Number(localStorage.getItem('bili_search_page_size') || 30);
+    return (n >= 10 && n <= 100) ? n : 30;
+  }
+  function doSearch(keyword, page) {
     var kw = String(keyword || '').trim();
     if (!kw) { showToast('请输入搜索关键词', 'warn'); return; }
+    var pg = Math.max(1, Number(page) || 1);
+    var ps = searchPageSize();
+    searchState = { kw: kw, page: pg, pageSize: ps, total: 0 };
     setFinderState('searching');
     // B 站搜索接口强制 WBI 签名（直连返回 HTML 风控页），签名后走代理 / 直连
-    var signedPromise = wbiSign({ search_type: 'video', keyword: kw, page: 1, page_size: 30 }).then(function (signed) {
+    var signedPromise = wbiSign({ search_type: 'video', keyword: kw, page: pg, page_size: ps }).then(function (signed) {
       var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
       return 'https://api.bilibili.com/x/web-interface/search/type?' + q;
     }).catch(function () {
       // 签名失败时退回未签名请求（部分环境仍可放行）
-      return 'https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=' + encodeURIComponent(kw) + '&page=1&page_size=30';
+      return 'https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=' + encodeURIComponent(kw) + '&page=' + pg + '&page_size=' + ps;
     });
     signedPromise.then(function (url) { return searchApiGet(url); }).then(function (data) {
-      var results = (data && data.data && data.data.result) || [];
+      var d = (data && data.data) || {};
+      var results = d.result || [];
+      var total = Number(d.numResults) || 0;
+      var pages = Math.max(1, Math.ceil(total / ps));
+      searchState.total = total;
       if (!results.length) {
         setFinderState('idle');
         showToast('未搜索到「' + kw + '」相关视频', 'warn');
+        renderListPager(pg, pages);
         return;
       }
       var items = results.map(function (r) {
         return {
           bvid: r.bvid || '', aid: r.aid || null,
           pic: fixCover(r.pic), title: cleanSearchTitle(r.title) || (r.title || ''),
-          duration: r.duration ? fmtDuration(r.duration) : '',
+          duration: r.duration ? (typeof r.duration === 'string' ? r.duration.trim() : fmtDuration(r.duration)) : '',
           stat: { view: Number(r.play) || 0, danmaku: Number(r.video_review) || 0 },
           author: r.author || '', fromSearch: true, searchRank: r.rank || 0
         };
       });
-      openListPanel('搜索「' + kw + '」', '搜索结果', items);
+      openListPanel('搜索「' + kw + '」（第 ' + pg + ' / ' + pages + ' 页）', '搜索结果', items, kw);
+      renderListPager(pg, pages);
     }).catch(function (err) {
       setFinderState('idle');
       showToast('搜索失败：' + (err && err.message || '网络错误'), 'fail');
+    });
+  }
+  /* 渲染分页栏：页码按钮（过多时省略）+ 跳页输入 */
+  function renderListPager(pg, pages) {
+    if (!listPager) return;
+    if (!searchState.kw || pages <= 1) { listPager.hidden = true; return; }
+    listPager.hidden = false;
+    var box = document.getElementById('pager-pages');
+    box.innerHTML = '';
+    function addBtn(n, label, active) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pager-page-btn' + (active ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', function () { doSearch(searchState.kw, n); });
+      box.appendChild(b);
+    }
+    var win = 6; // 窗口大小：页码过多时省略中间
+    for (var i = 1; i <= pages; i++) {
+      if (pages > 11 && i > 2 && i < pages - 1 && Math.abs(i - pg) > win) {
+        if (box.lastChild && box.lastChild.textContent !== '…') {
+          var e = document.createElement('span');
+          e.textContent = '…';
+          box.appendChild(e);
+        }
+        continue;
+      }
+      addBtn(i, String(i), i === pg);
+    }
+    var prev = document.getElementById('pager-prev');
+    var next = document.getElementById('pager-next');
+    if (prev) prev.disabled = pg <= 1;
+    if (next) next.disabled = pg >= pages;
+    var pi = document.getElementById('pager-input');
+    if (pi) pi.value = String(pg);
+    if (listPager.dataset && listPager.dataset.pages !== String(pages)) {
+      listPager.dataset.pages = String(pages);
+    }
+  }
+  function bindPager() {
+    var prev = document.getElementById('pager-prev');
+    var next = document.getElementById('pager-next');
+    var go = document.getElementById('pager-go');
+    var pi = document.getElementById('pager-input');
+    if (prev) prev.addEventListener('click', function () { if (searchState.kw && searchState.page > 1) doSearch(searchState.kw, searchState.page - 1); });
+    if (next) next.addEventListener('click', function () { if (searchState.kw) doSearch(searchState.kw, searchState.page + 1); });
+    if (go && pi) go.addEventListener('click', function () {
+      var n = Number(pi.value);
+      if (!n || n < 1) { showToast('请输入有效页码', 'warn'); return; }
+      doSearch(searchState.kw, n);
+    });
+    if (pi) pi.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        var n = Number(pi.value);
+        if (n && n >= 1) doSearch(searchState.kw, n);
+      }
     });
   }
   var searchBtn = $('search-btn');
@@ -1053,7 +1149,7 @@
     var v = inputEl.value.trim();
     if (!v) { showToast('请输入关键词或链接', 'warn'); return; }
     if (/^(https?:)?\/\//i.test(v) || /^BV[0-9A-Za-z]{10}/i.test(v) || /^(av|ss|ep)\d+/i.test(v) || /space\.bilibili\.com/i.test(v)) {
-      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      startParse(v);
       return;
     }
     doSearch(v);
@@ -1173,7 +1269,7 @@
       var q = Object.keys(signed).map(function (k) {
         return k + '=' + encodeURIComponent(signed[k]);
       }).join('&');
-      return apiGet('https://api.bilibili.com/x/player/playurl?' + q);
+      return apiGet('https://api.bilibili.com/x/player/playurl?' + q, { preferProxy: true });
     });
   }
 
@@ -1610,6 +1706,13 @@
         showToast('🗑 文件已删除', 'ok');
         if (id) removeHistoryRecord(id);
         if (refreshFn) refreshFn();
+        // 同步移除任务区 / 队列中指向该文件的残余任务卡
+        tasks.slice().forEach(function (t) {
+          var tp = t.path || '';
+          if (tp && (tp === pathOrName || tp.indexOf(pathOrName) >= 0 || pathOrName.indexOf(tp) >= 0)) {
+            removeTaskProcess(t);
+          }
+        });
       } else {
         showToast('❌ ' + ((r && r.error) || '删除失败'), 'fail');
       }
@@ -2119,11 +2222,13 @@
 
   function updateTaskControls(t) {
     if (!t.pauseEl) return;
-    t.pauseEl.hidden = !(window.biliAPI && window.biliAPI.pauseDownload && t.token && t.phase !== 'merging' && ['running', 'paused'].indexOf(t.status) >= 0);
+    // 有续传数据且处于暂停（含重启恢复的待继续）时由「继续下载」按钮承接，隐藏重复的「继续」
+    var resumeActive = !!(t._resumeMeta && t.status === 'paused');
+    t.pauseEl.hidden = !(window.biliAPI && window.biliAPI.pauseDownload && t.token && t.phase !== 'merging' && ['running', 'paused'].indexOf(t.status) >= 0) || resumeActive;
     t.pauseEl.textContent = t.status === 'paused' ? '继续' : '暂停';
     t.retryEl.hidden = ['error', 'cancelled'].indexOf(t.status) < 0;
     // 跨重启/暂停任务：有续传数据且处于暂停（含重启恢复的待继续）时显示「继续下载」
-    if (t.resumeEl) t.resumeEl.hidden = !(t._resumeMeta && t.status === 'paused');
+    if (t.resumeEl) t.resumeEl.hidden = !resumeActive;
     t.el.querySelector('.task-cancel').hidden = ['done', 'error', 'cancelled'].indexOf(t.status) >= 0;
   }
   function setTaskStatus(t, status, text) {
@@ -2992,9 +3097,8 @@
   inputEl.addEventListener('input', function () {
     var v = inputEl.value.trim();
     clearBtn.hidden = !v;
-    if (v.length >= 4) {
-      debounceParse(v);
-    } else {
+    // 手动输入不再自动解析：仅清空输入框显隐；点击搜索 / 回车 / 粘贴时才触发加载
+    if (v.length < 4) {
       clearTimeout(debounceTimer);
       setFinderState('');
       setStatus('', '');
@@ -3137,13 +3241,12 @@
     if (orb) orb.style.visibility = 'hidden';
   }
   if (taskMinBtn) taskMinBtn.addEventListener('click', minimizeTasks);
-  // 悬浮窗拖动（标题栏，排除按钮）
+  // 悬浮窗拖动（整个 UI 作为判定范围，排除按钮与输入控件）
   (function () {
     var dragging = false, dx = 0, dy = 0;
-    var titleEl = document.querySelector('.tasks-title');
-    if (!titleEl) return;
-    titleEl.addEventListener('mousedown', function (ev) {
-      if (ev.target.closest && ev.target.closest('button')) return;
+    if (!tasksCard) return;
+    tasksCard.addEventListener('mousedown', function (ev) {
+      if (ev.target.closest && (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('select'))) return;
       dragging = true;
       var r = tasksCard.getBoundingClientRect();
       dx = ev.clientX - r.left;
@@ -3177,6 +3280,7 @@
 
   /* ---------- 下载队列页 + 主菜单 ---------- */
   if (queueBtn) queueBtn.addEventListener('click', openQueuePanel);
+  bindPager();
   if (queueBack) queueBack.addEventListener('click', closeQueuePanel);
   if (queueCancelAll) queueCancelAll.addEventListener('click', cancelAllTasks);
   if (railHomeBtn) railHomeBtn.addEventListener('click', goHome);
@@ -3591,6 +3695,15 @@
     var savedConc = Number(localStorage.getItem('bili_max_concurrent') || 8);
     applyMaxConcurrent(savedConc);
   } catch (e) { applyMaxConcurrent(8); }
+  var searchPageSizeSelect = $('search-page-size');
+  if (searchPageSizeSelect) {
+    var _sps = Number(localStorage.getItem('bili_search_page_size') || 30);
+    if (_sps >= 10 && _sps <= 100) searchPageSizeSelect.value = String(_sps);
+    searchPageSizeSelect.addEventListener('change', function () {
+      localStorage.setItem('bili_search_page_size', searchPageSizeSelect.value);
+      showToast('搜索每页数量已设为 ' + searchPageSizeSelect.value, 'ok');
+    });
+  }
   if (maxConcurrentSelect) maxConcurrentSelect.addEventListener('change', function () {
     applyMaxConcurrent(maxConcurrentSelect.value);
     try { localStorage.setItem('bili_max_concurrent', String(maxConcurrent)); } catch (e) { }
@@ -3804,7 +3917,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.1';
+  var APP_VERSION = '1.6.2';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -3831,9 +3944,24 @@
         } catch (e) { }
         if (newer) {
           if (infoEl) {
-            infoEl.innerHTML = '发现新版本 <b>v' + escHtml(tag) + '</b>：<a href="javascript:void(0)" id="update-go">前往下载</a>';
+            // 网页链接（Release 页）+ 各平台产物直链（点击直接下载，速度更快）
+            var relUrl = 'https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/' + encodeURIComponent(rel.tag_name);
+            var html = '发现新版本 <b>v' + escHtml(tag) + '</b>：<a href="javascript:void(0)" id="update-go">前往下载（网页）</a>';
+            var assets = (rel.assets || []).filter(function (a) { return a && a.name && /(Setup|win32-x64|Android|apk|zip)$/i.test(a.name); });
+            if (assets.length) {
+              html += '<div style="margin-top:6px;font-size:12px;line-height:1.9">直接下载：';
+              assets.forEach(function (a, i) {
+                html += '<a href="javascript:void(0)" data-url="' + escHtml(a.browser_download_url || relUrl) + '" class="update-asset">' + escHtml(a.name) + '</a>' + (i < assets.length - 1 ? ' ｜ ' : '');
+              });
+              html += '</div>';
+            }
+            infoEl.innerHTML = html;
             var go = document.getElementById('update-go');
-            if (go) go.addEventListener('click', function () { openReleasePage('https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/' + encodeURIComponent(rel.tag_name)); });
+            if (go) go.addEventListener('click', function () { openReleasePage(relUrl); });
+            var ats = infoEl.querySelectorAll('.update-asset');
+            Array.prototype.forEach.call(ats, function (a) {
+              a.addEventListener('click', function () { openReleasePage(a.getAttribute('data-url')); });
+            });
           }
           showToast('🆕 发现新版本 v' + tag + '，可在设置中前往下载', 'warn');
         } else {
@@ -3935,6 +4063,15 @@
       }
     });
   }
+  // 进度节流：16 线程高频进度事件按 120ms 合并更新，避免页面丢帧卡顿
+  var _throttle = {};
+  function throttledProgress(tk, frac, text, speed) {
+    var now = Date.now();
+    var rec = _throttle[tk.token];
+    if (rec && now - rec.t < 120 && frac < 1) return;
+    _throttle[tk.token] = { t: now, frac: frac };
+    setTaskProgress(tk, frac, text, speed);
+  }
   if (window.biliAPI && window.biliAPI.onMuxProgress) {
     window.biliAPI.onMuxProgress(function (d) {
       if (!d || !d.token) return;
@@ -3944,7 +4081,7 @@
           if (d.tempDir) { tk.resumeDirs = tk.resumeDirs || {}; tk.resumeDirs[d.resKey || 'v'] = d.tempDir; if (tk._resumeMeta) tk._resumeMeta.resumeDirs = tk.resumeDirs; }
           if (tk.status === 'running') {
             if (d.phase) tk.phase = d.phase;
-            setTaskProgress(tk, d.frac || 0, (d.stage || '下载中') + (d.frac >= 1 ? '' : ' ' + ((d.frac || 0) * 100).toFixed(1) + '%'), d.speed);
+            throttledProgress(tk, d.frac || 0, (d.stage || '下载中') + (d.frac >= 1 ? '' : ' ' + ((d.frac || 0) * 100).toFixed(1) + '%'), d.speed);
           }
         }
       }
@@ -3959,7 +4096,7 @@
         if (tk.token === d.token) {
           if (d.tempDir) { tk.resumeDir = d.tempDir; if (tk._resumeMeta) tk._resumeMeta.resumeDir = d.tempDir; }
           if (tk.status === 'running') {
-            setTaskProgress(tk, d.frac || 0, (d.stage || '下载中') + (d.frac >= 1 ? '' : ' ' + ((d.frac || 0) * 100).toFixed(1) + '%'), d.speed);
+            throttledProgress(tk, d.frac || 0, (d.stage || '下载中') + (d.frac >= 1 ? '' : ' ' + ((d.frac || 0) * 100).toFixed(1) + '%'), d.speed);
           }
         }
       }
@@ -4104,7 +4241,7 @@
       var btn = ev.target.closest ? ev.target.closest('.ui-switch-btn') : null;
       if (!btn) return;
       applyUiMode(btn.getAttribute('data-mode'));
-      showToast(btn.getAttribute('data-mode') === 'lite' ? '已切换到精简版（老版 UI）' : '已切换到完全版（当前）', 'ok');
+      showToast(btn.getAttribute('data-mode') === 'lite' ? '已切换到精简版' : '已切换到完全版', 'ok');
     });
     var savedMode = 'full';
     try { savedMode = localStorage.getItem('biliUiMode') || 'full'; } catch (e) { }
