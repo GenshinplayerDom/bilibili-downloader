@@ -515,6 +515,14 @@
       <div class="set-note">首次下载自动获取直链并缓存（约 6 小时有效），后续下载自动复用，无需重复请求接口。</div>
     </section>
 
+    <!-- 网络重置 -->
+    <section class="set-section">
+      <h3>网络重置 <span class="set-hint">（被 B 站临时拉黑 / 清晰度降级时使用）</span></h3>
+      <div class="set-note">固定网络中短时间向 bilibili.com 发送大量数据流，可能被哔哩哔哩临时拉黑，导致视频只能获取低清晰度或下载速度骤降。点击下方按钮将自动执行：刷新 DNS 缓存 → 释放并重新获取 IP → 重置 Winsock → 重置 IP 堆栈（需管理员授权，会短暂断网）。重置完成后请重启电脑并重新打开本软件。</div>
+      <button type="button" class="set-btn primary" id="net-reset-btn">🔄 一键重置网络</button>
+      <div class="fix-logs" id="net-reset-logs" hidden></div>
+    </section>
+
     <!-- 使用教程 -->
     <section class="set-section">
       <h3>使用教程</h3>
@@ -525,6 +533,8 @@
         <li><b>多任务</b>：可同时下载多个视频 / 音频，每个任务独立进度；任务在本次使用期间保留，可打开 / 定位 / 删除文件；左下角「🕘」查看历史下载记录。</li>
         <li><b>登录</b>：Windows 客户端版点击「登录哔哩哔哩」在应用内扫码登录；Android / 网页版粘贴 Cookie（含 SESSDATA）。</li>
         <li><b>代理异常</b>：确认左上角代理状态为绿色；异常时点击「一键修复」。Android 版代理内置于应用，无需额外操作。</li>
+        <li><b>网络被限速 / 清晰度降级</b>：固定网络中短时间向 bilibili.com 发送大量数据流，可能被哔哩哔哩临时拉黑（表现为视频只能获取低清晰度、下载速度骤降）。可在下方「网络重置」一键重置网络（刷新 DNS、释放/重新获取 IP、重置 Winsock 与 IP 堆栈），或切换网络后重启软件即可恢复。</li>
+        <li><b>在线播放</b>：视频详情页「返回列表」旁或封面播放三角可在线播放，默认 1080P（未登录自动 720P）。如遇无法播放，优先尝试网络重置后重试。</li>
       </ol>
     </section>
 
@@ -560,12 +570,41 @@
       <div class="set-note">本项目基于 MIT 协议开源，可自由使用、修改与分发，请保留署名「GenshinplayerDom」并遵循协议条款。点击上方仓库地址可在浏览器中打开 GitHub 源码页。</div>
     </section>
 
+    <!-- 支持作者 -->
+    <section class="set-section">
+      <h3>支持作者</h3>
+      <div class="set-note">本软件完全免费开源。如果您觉得好用，可以请作者喝杯奶茶，您的支持便是我最大的动力 ❤</div>
+      <button type="button" class="set-btn primary" id="support-btn">❤ 支持作者</button>
+    </section>
+
     <!-- 署名 -->
     <div class="app-credit">Made by <b>GenshinplayerDom</b></div>
 
   </div>
 </aside>
 <div class="settings-mask" id="settings-mask" hidden></div>
+
+<!-- 支持作者弹窗 -->
+<div class="player-modal" id="support-modal" hidden>
+  <div class="player-box support-box">
+    <div class="player-head">
+      <span id="support-title">❤ 支持作者</span>
+      <button type="button" class="icon-btn" id="support-close" title="关闭">✕</button>
+    </div>
+    <div class="support-body">
+      <p class="support-msg">您的支持，便是我最大的动力</p>
+      <div class="support-tabs">
+        <button type="button" class="support-tab active" data-pay="wechat">微信支付</button>
+        <button type="button" class="support-tab" data-pay="alipay">支付宝</button>
+      </div>
+      <div class="support-qr">
+        <img id="qr-wechat" src="assets/qr-wechat.png" alt="微信收款码">
+        <img id="qr-alipay" src="assets/qr-alipay.jpg" alt="支付宝收款码" hidden>
+      </div>
+      <p class="support-note">扫码打赏，感谢支持开源 ❤</p>
+    </div>
+  </div>
+</div>
 
 <!-- 播放器预览（功能13） -->
 <div class="player-modal" id="player-modal" hidden>

@@ -944,6 +944,41 @@
       showToast('在线播放失败：' + (e2 && e2.message || '网络错误'), 'fail');
     });
   }
+  function showPlayerError(msg) {
+    if (playerTitle) playerTitle.textContent = msg;
+    if (playerVideo) { playerVideo.pause(); playerVideo.removeAttribute('src'); playerVideo.load(); }
+    showToast(msg, 'fail');
+  }
+  // 播放失败后的自动降级重试链：MP4(1080P) → DASH(720P) → MP4(720P)，尽力保证可播放
+  function playerFallback(title, depth) {
+    depth = depth || 0;
+    if (depth > 3) { showPlayerError('播放失败：无法获取可播放的视频流，请检查网络或稍后重试'); return; }
+    var qn = 80;
+    if (depth === 0) qn = 80;       // 1080P MP4
+    else if (depth === 1) qn = 64;  // 720P DASH
+    else qn = 64;                   // 720P MP4
+    var fnval = (depth === 1) ? 4048 : 16;
+    fetchPlayurl(fnval, qn, current).then(function (data) {
+      if (fnval === 4048) {
+        var arr = (data && data.dash && data.dash.video) || [];
+        if (!arr.length) throw new Error('无 DASH 流');
+        var q = data.quality || qn;
+        var cand = arr.filter(function (x) { return x.id <= q; });
+        var v = cand.length ? cand.reduce(function (a, b) { return a.id > b.id ? a : b; }) : arr[0];
+        if (!v || !v.baseUrl) throw new Error('DASH 地址为空');
+        playerVideo.src = v.baseUrl || (v.backupUrl && v.backupUrl[0]);
+      } else {
+        if (!data || !data.durl || !data.durl.length) throw new Error('无 MP4 流');
+        playerVideo.src = data.durl[0].url;
+      }
+      if (playerTitle) playerTitle.textContent = '在线播放（已降级）：' + (title || '');
+      playerVideo.play().catch(function () { });
+    }).catch(function (e) {
+      // 播放阶段再次失败 → 继续降级
+      playerVideo.onerror = function () { playerFallback(title, depth + 1); };
+      playerVideo.play().catch(function () { playerFallback(title, depth + 1); });
+    });
+  }
   function openOnlinePlayer(url, title) {
     playerVideo.pause();
     playerVideo.removeAttribute('src');
@@ -960,8 +995,13 @@
         if (!triedFallback) {
           triedFallback = true;
           playerVideo.onerror = null;
+          // 代理流失败 → 先试直链（Electron 主进程 webRequest 会注入 Referer）
           playerVideo.src = url;
           playerVideo.play().catch(function () { });
+        } else {
+          // 直链也失败 → 自动降级重试（MP4 / 720P / 更低）
+          playerVideo.onerror = null;
+          playerFallback(title, 0);
         }
       };
       playerVideo.src = viaProxy(tok);
@@ -3284,6 +3324,56 @@
   settingsBtn.addEventListener('click', openSettings);
   settingsClose.addEventListener('click', closeSettings);
   settingsMask.addEventListener('click', closeSettings);
+
+  /* ---------- v1.6.6：网络重置（被 B 站临时拉黑 / 清晰度降级时一键重置） ---------- */
+  var netResetBtn = $('net-reset-btn');
+  var netResetLogs = $('net-reset-logs');
+  if (netResetBtn) netResetBtn.addEventListener('click', function () {
+    if (!window.biliAPI || !window.biliAPI.netReset) {
+      showToast('当前环境不支持一键网络重置（仅 Windows 客户端可用）', 'warn');
+      return;
+    }
+    if (!confirm('即将执行网络重置：刷新 DNS、释放/重新获取 IP、重置 Winsock 与 IP 堆栈。\n需管理员授权且会短暂断网，重置完成后建议重启电脑。是否继续？')) return;
+    if (netResetLogs) { netResetLogs.hidden = false; netResetLogs.textContent = '正在执行网络重置，请在弹出的系统授权窗口中确认…'; }
+    netResetBtn.disabled = true;
+    window.biliAPI.netReset().then(function (res) {
+      netResetBtn.disabled = false;
+      if (netResetLogs) netResetLogs.textContent = res && res.ok ? ('✅ ' + (res.msg || '网络重置已执行，请重启电脑后重新打开软件')) : ('❌ 网络重置失败：' + (res && res.msg || '未知错误'));
+      showToast(res && res.ok ? '网络重置已执行，请重启电脑生效' : '网络重置失败', res && res.ok ? 'ok' : 'fail');
+    }).catch(function (e) {
+      netResetBtn.disabled = false;
+      if (netResetLogs) netResetLogs.textContent = '❌ 网络重置失败：' + (e && e.message || '未知错误');
+    });
+  });
+
+  /* ---------- v1.6.6：支持作者（微信 / 支付宝收款码） ---------- */
+  var supportBtn = $('support-btn');
+  var supportModal = $('support-modal');
+  var supportClose = $('support-close');
+  var qrWechat = $('qr-wechat');
+  var qrAlipay = $('qr-alipay');
+  if (supportBtn) supportBtn.addEventListener('click', function () {
+    if (!supportModal) return;
+    supportModal.hidden = false;
+    document.querySelectorAll('.support-tab').forEach(function (t) {
+      t.classList.toggle('active', t.getAttribute('data-pay') === 'wechat');
+    });
+    if (qrWechat) qrWechat.hidden = false;
+    if (qrAlipay) qrAlipay.hidden = true;
+  });
+  if (supportClose) supportClose.addEventListener('click', function () { if (supportModal) supportModal.hidden = true; });
+  if (supportModal) supportModal.addEventListener('click', function (e) { if (e.target === supportModal) supportModal.hidden = true; });
+  var supportTabs = document.querySelectorAll('.support-tab');
+  for (var ti = 0; ti < supportTabs.length; ti++) {
+    (function (tab) {
+      tab.addEventListener('click', function () {
+        var pay = tab.getAttribute('data-pay');
+        supportTabs.forEach(function (t) { t.classList.toggle('active', t === tab); });
+        if (qrWechat) qrWechat.hidden = pay !== 'wechat';
+        if (qrAlipay) qrAlipay.hidden = pay !== 'alipay';
+      });
+    })(supportTabs[ti]);
+  }
   // ESC 关闭设置面板 / 记录页 / 下载队列
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !settingsPanel.hidden) closeSettings();
@@ -4008,7 +4098,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.5';
+  var APP_VERSION = '1.6.6';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

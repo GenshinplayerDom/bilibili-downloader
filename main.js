@@ -445,6 +445,47 @@ function registerIpc() {
   });
 
   /* ---- 全局限速 / 下载统计（优化：限速 · 统计） ---- */
+  /* ---- v1.6.6：一键网络重置（被 B 站临时拉黑 / 清晰度降级时使用） ---- */
+  ipcHandle('bili:net-reset', function () {
+    return new Promise(function (resolve) {
+      try {
+        var batPath = path.join(app.getPath('userData'), 'net-reset.bat');
+        var lines = [
+          '@echo off',
+          'chcp 65001 >nul',
+          'echo 正在刷新DNS缓存...',
+          'ipconfig /flushdns',
+          'echo.',
+          'echo 正在释放IP...',
+          'ipconfig /release',
+          'echo.',
+          'echo 正在重新获取IP...',
+          'ipconfig /renew',
+          'echo.',
+          'echo 重置Winsock...',
+          'netsh winsock reset',
+          'echo.',
+          'echo 重置IP堆栈...',
+          'netsh int ip reset',
+          'echo.',
+          'echo 操作完成！请重启电脑生效',
+          'timeout /t 8 >nul'
+        ];
+        fs.writeFileSync(batPath, lines.join('\r\n'), 'utf8');
+        // netsh reset 需要管理员权限，以 RunAs 弹出 UAC 授权后执行
+        childProcess.execFile('powershell.exe', ['-NoProfile', '-Command', 'Start-Process -FilePath "' + batPath + '" -Verb RunAs -Wait'], { windowsHide: true }, function (err) {
+          if (err) {
+            // 用户取消 UAC 或执行失败
+            resolve({ ok: false, msg: err && err.message ? err.message : '未获得管理员授权' });
+          } else {
+            resolve({ ok: true, msg: '网络重置已执行，请重启电脑后重新打开软件' });
+          }
+        });
+      } catch (e) {
+        resolve({ ok: false, msg: e && e.message ? e.message : '网络重置失败' });
+      }
+    });
+  });
   ipcHandle('bili:set-rate-limit', function (event, kbps) {
     downloader.setRate(kbps);
     return { ok: true, limit: downloader.rate };

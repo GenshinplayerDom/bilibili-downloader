@@ -599,6 +599,20 @@ body.no-select { user-select: none; }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ---------- v1.6.6：支持作者弹窗 ---------- */
+.support-box { max-width: 440px; }
+.support-body { padding: 18px 22px 22px; text-align: center; }
+.support-msg { font-size: 15px; font-weight: 700; color: var(--brand-dark, #d84a72); margin: 0 0 14px; }
+.support-tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 16px; }
+.support-tab {
+  padding: 7px 18px; border: 1px solid var(--border, #e3e6ee); border-radius: 20px;
+  background: #fff; cursor: pointer; font-size: 13px; color: #555; transition: all .15s;
+}
+.support-tab.active { background: linear-gradient(135deg, var(--brand), var(--brand-dark)); color: #fff; border-color: transparent; }
+.support-qr { display: flex; justify-content: center; }
+.support-qr img { width: 260px; max-width: 100%; border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+.support-note { font-size: 12px; color: var(--muted, #888); margin: 14px 0 0; }
+
 /* ---------- 左侧竖向侧边栏（参考左侧 UI） ---------- */
 .settings-mask {
   position: fixed; inset: 0;

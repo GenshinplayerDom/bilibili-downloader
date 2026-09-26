@@ -27,6 +27,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('biliAPI', {
   isElectron: true,
   proxyConfig: function () { return ipcRenderer.invoke('bili:proxy-config'); },
+  netReset: function () { return ipcRenderer.invoke('bili:net-reset'); },
   pauseDownload: function (token) { return ipcRenderer.invoke('bili:download-pause', token); },
   resumeDownload: function (token) { return ipcRenderer.invoke('bili:download-resume', token); },
   login: function () {
