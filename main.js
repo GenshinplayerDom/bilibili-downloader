@@ -303,8 +303,16 @@ async function muxDownload(payload) {
       progress[key] = fraction;
       sendProgress('bili:mux-progress', { token, frac: .9 * (progress.v + progress.a) / (audioUrls.length ? 2 : 1), speed, stage: '下载中' });
     };
-    const jobs = [downloader.download(videoUrls, video, { threads: payload.threads, control, onProgress: (...args) => report('v', ...args) })];
-    if (audioUrls.length) jobs.push(downloader.download(audioUrls, audio, { threads: payload.threads, control, onProgress: (...args) => report('a', ...args) }));
+    const resumeDirs = (payload.resumeDirs && Array.isArray(payload.resumeDirs)) ? payload.resumeDirs : [];
+    const partOpts = { threads: payload.threads, control, keepPartsOnAbort: payload.persistParts === true,
+      onProgress: (...args) => report('v', ...args),
+      onTemp: td => sendProgress('bili:mux-progress', { token, tempDir: td, resKey: 'v', stage: '下载中' }) };
+    const jobs = [downloader.download(videoUrls, video, { ...partOpts, resumeDir: resumeDirs[0] || payload.resumeDir || undefined })];
+    if (audioUrls.length) jobs.push(downloader.download(audioUrls, audio, {
+      ...partOpts, resumeDir: resumeDirs[1] || undefined,
+      onProgress: (...args) => report('a', ...args),
+      onTemp: td => sendProgress('bili:mux-progress', { token, tempDir: td, resKey: 'a', stage: '下载中' })
+    }));
     const results = await Promise.allSettled(jobs.map(job => job.catch(error => { control.cancel(); throw error; })));
     const failed = results.find(result => result.status === 'rejected' && result.reason.code !== 'CANCELLED') || results.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
@@ -413,7 +421,10 @@ function registerIpc() {
       dest = security.reserveOutput(getDownloadDir(), payload.filename);
       await downloader.download(payload.urls || [payload.url], dest, {
         threads: payload.threads, control,
-        onProgress: (frac, bytes, speed) => sendProgress('bili:stream-progress', { token, frac, speed, stage: '下载中 ' + (frac * 100).toFixed(0) + '%' })
+        keepPartsOnAbort: payload.persistParts === true,
+        resumeDir: payload.resumeDir || undefined,
+        onProgress: (frac, bytes, speed) => sendProgress('bili:stream-progress', { token, frac, speed, stage: '下载中 ' + (frac * 100).toFixed(0) + '%' }),
+        onTemp: td => sendProgress('bili:stream-progress', { token, tempDir: td, speed: 0 })
       });
       rememberFile(dest); complete = true;
       return { ok: true, path: dest, filename: path.basename(dest), size: fs.statSync(dest).size };

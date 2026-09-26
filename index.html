@@ -38,7 +38,8 @@
   <!-- 主操作区（中间偏上） -->
   <section class="card finder-card">
     <div class="input-wrap" id="finder">
-      <input type="text" id="url-input" placeholder="https://www.bilibili.com/video/BV1xx411c7mD 或直接粘贴 BV 号" autocomplete="off" spellcheck="false">
+      <input type="text" id="url-input" placeholder="粘贴 B 站链接 / BV 号，或输入关键词直接搜索" autocomplete="off" spellcheck="false">
+      <button type="button" id="search-btn" title="按关键词搜索（输入框内容非链接时）">🔍 搜索</button>
       <button type="button" id="clear-btn" hidden>清空</button>
     </div>
     <div class="finder-status" id="finder-status"></div>
@@ -439,7 +440,8 @@
       <div class="set-row">
         <span class="set-label">外观</span>
         <select id="theme-select" style="width:130px">
-          <option value="light" selected>浅色</option>
+          <option value="system" selected>跟随系统</option>
+          <option value="light">浅色</option>
           <option value="dark">深色</option>
         </select>
       </div>
@@ -489,6 +491,20 @@
         <li><b>登录</b>：Windows 客户端版点击「登录哔哩哔哩」在应用内扫码登录；Android / 网页版粘贴 Cookie（含 SESSDATA）。</li>
         <li><b>代理异常</b>：确认左上角代理状态为绿色；异常时点击「一键修复」。Android 版代理内置于应用，无需额外操作。</li>
       </ol>
+    </section>
+
+    <!-- 版本更新 -->
+    <section class="set-section" id="update-section">
+      <h3>版本与更新</h3>
+      <div class="set-row">
+        <span class="set-label">当前版本</span>
+        <span class="set-value" id="app-version">v1.5.0</span>
+      </div>
+      <div class="set-row">
+        <span class="set-label">更新检查</span>
+        <button type="button" class="set-link" id="check-update-btn">检查更新</button>
+      </div>
+      <div class="set-note" id="update-info">启动时自动检查 GitHub Releases 新版本；有新版本时会提示前往下载。</div>
     </section>
 
     <!-- 开源信息 -->
