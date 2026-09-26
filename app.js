@@ -966,8 +966,9 @@
     if (!current || !current.bvid) { showToast('当前无视频信息', 'warn'); return; }
     if (!playerModal || !playerVideo) { showToast('当前环境不支持在线播放', 'warn'); return; }
     showToast('正在获取在线播放地址（默认 1080P）…', 'ok');
-    // 优先 DASH 视频流（fMP4，1080P；未登录时服务端自动降 720P），video 可直接播放；
-    // 降级链：1080P DASH → 1080P MP4 → 720P DASH → 720P MP4
+    // 优先 MP4（durl 合流，含音频轨道，在线播放有声音）；
+    // DASH 为分离流（视频流无音频轨道，仅当无 MP4 时兜底）。
+    // 降级链：1080P MP4 → 1080P DASH → 720P MP4 → 720P DASH
     var tryDash = function (qn) {
       return fetchPlayurl(4048, qn, current).then(function (data) {
         var arr = (data && data.dash && data.dash.video) || [];
@@ -988,8 +989,8 @@
         openOnlinePlayer(data.durl[0].url, current.title);
       });
     };
-    tryDash(80).catch(function () { return tryMp4(80); }).catch(function () {
-      return tryDash(64).catch(function () { return tryMp4(64); });
+    tryMp4(80).catch(function () { return tryDash(80); }).catch(function () {
+      return tryMp4(64).catch(function () { return tryDash(64); });
     }).catch(function (e2) {
       showToast('在线播放失败：' + (e2 && e2.message || '网络错误'), 'fail');
     });
@@ -1003,11 +1004,11 @@
   function playerFallback(title, depth) {
     depth = depth || 0;
     if (depth > 3) { showPlayerError('播放失败：无法获取可播放的视频流，请检查网络或稍后重试'); return; }
-    var qn = 80;
-    if (depth === 0) qn = 80;       // 1080P MP4
-    else if (depth === 1) qn = 64;  // 720P DASH
-    else qn = 64;                   // 720P MP4
-    var fnval = (depth === 1) ? 4048 : 16;
+    var qn, fnval;
+    if (depth === 0) { qn = 80; fnval = 16; }      // 1080P MP4（合流有声）
+    else if (depth === 1) { qn = 64; fnval = 16; } // 720P MP4（合流有声）
+    else if (depth === 2) { qn = 64; fnval = 4048; } // 720P DASH（分离流兜底）
+    else { qn = 32; fnval = 4048; }                  // 480P DASH（分离流兜底）
     fetchPlayurl(fnval, qn, current).then(function (data) {
       if (fnval === 4048) {
         var arr = (data && data.dash && data.dash.video) || [];
@@ -1017,11 +1018,12 @@
         var v = cand.length ? cand.reduce(function (a, b) { return a.id > b.id ? a : b; }) : arr[0];
         if (!v || !v.baseUrl) throw new Error('DASH 地址为空');
         playerVideo.src = v.baseUrl || (v.backupUrl && v.backupUrl[0]);
+        if (playerTitle) playerTitle.textContent = '在线播放（已降级·视频流无音频，建议 MP4 或下载）：' + (title || '');
       } else {
         if (!data || !data.durl || !data.durl.length) throw new Error('无 MP4 流');
         playerVideo.src = data.durl[0].url;
+        if (playerTitle) playerTitle.textContent = '在线播放（已降级）：' + (title || '');
       }
-      if (playerTitle) playerTitle.textContent = '在线播放（已降级）：' + (title || '');
       playerVideo.play().catch(function () { });
     }).catch(function (e) {
       // 播放阶段再次失败 → 继续降级
@@ -2309,6 +2311,33 @@
     if (queueCancelAll) queueCancelAll.hidden = alive.length === 0;
     showToast(count ? ('已取消 ' + count + ' 个下载任务') : '当前没有进行中的下载任务', count ? 'warn' : 'ok');
   }
+  /** 一键暂停全部：所有正在下载的任务置为已暂停（保留分片，可继续） */
+  function pauseAllTasks() {
+    var count = 0;
+    tasks.slice().forEach(function (t) {
+      if (t.status === 'running' && t.pauseEl && !t.pauseEl.disabled) {
+        count++;
+        t.pauseEl.click();
+      }
+    });
+    showToast(count ? ('已暂停 ' + count + ' 个下载任务') : '当前没有正在下载的任务', count ? 'ok' : 'warn');
+  }
+  /** 一键继续全部：所有已暂停 / 待继续任务恢复（含跨重启续传任务） */
+  function continueAllTasks() {
+    var count = 0;
+    tasks.slice().forEach(function (t) {
+      if (t.status !== 'paused') return;
+      if (t._resumeMeta) {
+        count++;
+        removeTaskProcess(t);
+        resumeStoredTask(t._resumeMeta);
+      } else if (t.pauseEl && !t.pauseEl.disabled) {
+        count++;
+        t.pauseEl.click();
+      }
+    });
+    showToast(count ? ('已继续 ' + count + ' 个下载任务') : '当前没有已暂停的任务', count ? 'ok' : 'warn');
+  }
 
   function createTask(name, badge) {
     taskSeq++;
@@ -2479,6 +2508,8 @@
         '<span class="task-name"></span>' +
         '<span class="task-badge"></span>' +
         '<span class="task-status"></span>' +
+        '<button type="button" class="task-pause" hidden>' + T('pause') + '</button>' +
+        '<button type="button" class="task-retry" hidden>' + T('retry') + '</button>' +
         '<button type="button" class="task-resume" hidden>' + T('resumeDl') + '</button>' +
         '<button type="button" class="task-cancel">' + T('cancel') + '</button>' +
         '</div>' +
@@ -2496,12 +2527,44 @@
         note.className = 'task-note' + (t.noteEl.className.indexOf('ok') >= 0 ? ' ok' : t.noteEl.className.indexOf('fail') >= 0 ? ' fail' : t.noteEl.className.indexOf('warn') >= 0 ? ' warn' : '');
         note.textContent = t.noteEl.textContent;
       }
-      t._q = { status: st, bar: bar, note: note };
+      t._q = { status: st, bar: bar, note: note, pause: null, retry: null, resume: null, cancel: null };
       var cancel = row.querySelector('.task-cancel');
       if (['running', 'paused', 'waiting', 'queued'].indexOf(t.status) < 0) cancel.hidden = true;
       cancel.addEventListener('click', function () {
         removeTaskProcess(t);
       });
+      t._q.cancel = cancel;
+      // 暂停 / 继续（普通暂停任务）：与主任务区一致
+      var pauseBtn = row.querySelector('.task-pause');
+      pauseBtn.hidden = !(t.status === 'running' || t.status === 'paused');
+      pauseBtn.addEventListener('click', function () {
+        var paused = t.status === 'paused';
+        pauseBtn.disabled = true;
+        var operation = paused ? window.biliAPI.resumeDownload : window.biliAPI.pauseDownload;
+        operation(t.token).then(function (result) {
+          if (result.ok && ['running', 'paused'].indexOf(t.status) >= 0) {
+            setTaskStatus(t, paused ? 'running' : 'paused', paused ? '继续下载中…' : '已暂停');
+            setTaskNote(t, 'warn', paused ? '继续下载剩余分片' : '已完成分片保留，点击继续下载');
+            if (paused) { try { saveResumeState(t); } catch (e) { } }
+            pauseBtn.textContent = paused ? T('pause') : T('resume');
+            pauseBtn.hidden = !(t.status === 'running' || t.status === 'paused');
+          }
+        }).catch(function (error) { showToast(error.message, 'fail'); }).finally(function () { pauseBtn.disabled = false; });
+      });
+      t._q.pause = pauseBtn;
+      // 重试：失败 / 取消后重建任务
+      var retryBtn = row.querySelector('.task-retry');
+      retryBtn.hidden = !(t.status === 'error' || t.status === 'cancelled');
+      retryBtn.addEventListener('click', function () {
+        var retry = createTask(t.name, t.badge);
+        retry.source = JSON.parse(JSON.stringify(t.source)); retry.settings = Object.assign({}, t.settings);
+        retry.type = t.type; retry._part = t._part;
+        var prefix = t.source.bvid + ':' + t.source.cid + ':';
+        Object.keys(dlCache).forEach(function (key) { if (key.indexOf(prefix) === 0) delete dlCache[key]; });
+        saveDlCache(); updateDlCacheCount();
+        runTaskByType(retry);
+      });
+      t._q.retry = retryBtn;
       // 队列「继续下载」：暂停 / 重启待继续任务一键恢复
       var resume = row.querySelector('.task-resume');
       resume.hidden = !(t._resumeMeta && t.status === 'paused');
@@ -2510,6 +2573,7 @@
         removeTaskProcess(t);
         resumeStoredTask(t._resumeMeta);
       });
+      t._q.resume = resume;
       queueList.appendChild(row);
     });
     if (queueCancelAll) {
@@ -3619,6 +3683,8 @@
   bindPager();
   if (queueBack) queueBack.addEventListener('click', function () { closeQueuePanel(); restorePrevView(); });
   if (queueCancelAll) queueCancelAll.addEventListener('click', cancelAllTasks);
+  if ($('queue-pause-all')) $('queue-pause-all').addEventListener('click', pauseAllTasks);
+  if ($('queue-continue-all')) $('queue-continue-all').addEventListener('click', continueAllTasks);
   if (railHomeBtn) railHomeBtn.addEventListener('click', goHome);
 
   /* ---------- 下载记录页 ---------- */
@@ -3671,7 +3737,7 @@
       settings: '设置', tutorial: '使用教程', update: '版本与更新', support: '支持作者', history: '下载记录', queue: '下载队列', batch: '批量下载',
       downloading: '下载中…', done: '已完成', cancelled: '已取消', paused: '已暂停', failed: '下载失败', taskCancelled: '任务已取消', waiting: '等待定时开始（%s）',
       queuedN: '等待中（排队第 %s 位）', maxConc: '已达到同时下载数上限（%s），自动排队等待',
-      pause: '暂停', resume: '继续', cancel: '取消', retry: '重试', resumeDl: '继续下载',
+      pause: '暂停', resume: '继续', cancel: '取消', retry: '重试', resumeDl: '继续下载', pauseAll: '暂停全部',
       preview: '预览', open: '打开', location: '所在位置', deleteFile: '删除文件',
       clearDone: '清除已完成', selectAll: '全选', unselectAll: '全不选', dlSelected: '一键下载勾选（%s）',
       interruptAll: '中断/取消全部', continueAll: '继续全部', emptyQueue: '暂无下载任务', emptyHistory: '暂无下载记录', clearHistory: '清空历史',
@@ -3691,7 +3757,7 @@
       settings: 'Settings', tutorial: 'Tutorial', update: 'Version & Updates', support: 'Support Author', history: 'History', queue: 'Queue', batch: 'Batch Download',
       downloading: 'Downloading…', done: 'Done', cancelled: 'Cancelled', paused: 'Paused', failed: 'Failed', taskCancelled: 'Task cancelled', waiting: 'Scheduled (%s)',
       queuedN: 'Queued (#%s)', maxConc: 'Max concurrent reached (%s), queued',
-      pause: 'Pause', resume: 'Resume', cancel: 'Cancel', retry: 'Retry', resumeDl: 'Resume',
+      pause: 'Pause', resume: 'Resume', cancel: 'Cancel', retry: 'Retry', resumeDl: 'Resume', pauseAll: 'Pause All',
       preview: 'Preview', open: 'Open', location: 'Open Folder', deleteFile: 'Delete File',
       clearDone: 'Clear Done', selectAll: 'Select All', unselectAll: 'Unselect All', dlSelected: 'Download Selected (%s)',
       interruptAll: 'Stop All', continueAll: 'Resume All', emptyQueue: 'No tasks', emptyHistory: 'No history', clearHistory: 'Clear History',
@@ -4125,6 +4191,8 @@
 
   /* ---------- v1.4：一键中断/取消所有 ---------- */
   if (tasksCancelAll) tasksCancelAll.addEventListener('click', cancelAllTasks);
+  if ($('tasks-pause-all')) $('tasks-pause-all').addEventListener('click', pauseAllTasks);
+  if ($('tasks-continue-all')) $('tasks-continue-all').addEventListener('click', continueAllTasks);
   // 初始：无活跃任务时隐藏中断按钮
   (function () {
     var alive0 = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
@@ -4370,7 +4438,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.8';
+  var APP_VERSION = '1.6.9';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

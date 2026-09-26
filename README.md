@@ -1,6 +1,6 @@
 # 哔哩下载器 · GenshinplayerDom
 
-B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.6.8**，作者 GenshinplayerDom，MIT License。
+B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.6.9**，作者 GenshinplayerDom，MIT License。
 
 > 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 

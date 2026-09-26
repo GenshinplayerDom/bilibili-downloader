@@ -58,6 +58,11 @@ html[data-theme="dark"] .mini-btn.danger:hover { background: #4a2830; }
 html[data-theme="dark"] .hist-item { background: #1f2229; border-color: var(--line); }
 html[data-theme="dark"] .hist-item .hist-actions button { background: #262a33; color: var(--text); border-color: #3a3f4b; }
 html[data-theme="dark"] .hist-item .hist-actions button.danger { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
+/* 深色：下载任务卡 / 进度条底色 */
+html[data-theme="dark"] .task-card { background: #1b1e24; border-color: var(--line); }
+html[data-theme="dark"] .task-bar { background: #2a2e38; }
+html[data-theme="dark"] .task-card .task-head button { background: #262a33; color: var(--text); border-color: #3a3f4b; }
+html[data-theme="dark"] .task-card .task-head button.task-cancel { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
 
 /* 无障碍（优化15）：键盘焦点可见 */
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {

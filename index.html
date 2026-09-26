@@ -164,6 +164,8 @@
   <div class="tasks-title">
     <button type="button" class="icon-btn task-min" id="task-min-btn" title="最小化为小球">×</button>
     下载任务 <span class="tasks-sub">本次使用期间保留</span>
+    <button type="button" class="mini-btn" id="tasks-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
+    <button type="button" class="mini-btn" id="tasks-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
     <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
     <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
   </div>
@@ -198,6 +200,8 @@
   <div class="queue-head">
     <h2>下载队列</h2>
     <div class="queue-head-actions">
+      <button type="button" class="mini-btn" id="queue-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
+      <button type="button" class="mini-btn" id="queue-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
       <button type="button" class="mini-btn danger" id="queue-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
       <button type="button" class="icon-btn" id="queue-back" title="返回上一级">←</button>
     </div>
