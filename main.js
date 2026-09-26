@@ -599,6 +599,17 @@ if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(function () {
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(false));
+  // 在线播放兜底：拦截 B 站视频 CDN 请求，注入 Referer / UA，
+  // 即使 <video> 跟随 302 到直链也不会被防盗链 403
+  try {
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      if (/bilivideo\.com|hdslb\.com|acgvideo\.com/i.test(details.url)) {
+        details.requestHeaders['Referer'] = 'https://www.bilibili.com/';
+        details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    });
+  } catch (_) { /* 旧版 Electron 无 webRequest 时忽略 */ }
   try { managed = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'managed-files.json'), 'utf8')); if (!Array.isArray(managed)) managed = []; } catch (_) {}
   proxyStart = startProxy();
   proxyStart.catch(error => logError('代理启动失败：' + error.message));

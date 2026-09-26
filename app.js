@@ -923,11 +923,12 @@
         var arr = (data && data.dash && data.dash.video) || [];
         if (!arr.length) throw new Error('该视频暂无 DASH 视频流');
         // 按 B 站实际返回 quality 匹配流（未登录 qn=80 时返回 720P/480P，选返回的最高档），
-        // 不再固定取 video[0]（可能是最低清晰度流）
+        // 不再固定取 video[0]（可能是最低清晰度流）；不依赖数组顺序
         var q = (data && data.quality) || qn;
-        var v = null;
-        for (var i = 0; i < arr.length; i++) { if (arr[i].id <= q) v = arr[i]; else break; }
-        if (!v) v = arr[arr.length - 1] || arr[0];
+        var candidates = arr.filter(function (x) { return x.id <= q; });
+        var v = candidates.length
+          ? candidates.reduce(function (a, b) { return a.id > b.id ? a : b; })
+          : arr.reduce(function (a, b) { return a.id < b.id ? a : b; });
         openOnlinePlayer(v.baseUrl || (v.backupUrl && v.backupUrl[0]), current.title);
       });
     };
@@ -4007,7 +4008,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.4';
+  var APP_VERSION = '1.6.5';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
