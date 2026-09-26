@@ -4370,7 +4370,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.7';
+  var APP_VERSION = '1.6.8';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

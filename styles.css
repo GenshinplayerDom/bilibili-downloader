@@ -36,6 +36,28 @@ html[data-theme="dark"] textarea {
   background: #262a33; color: var(--text); border-color: #3a3f4b;
 }
 html[data-theme="dark"] .player-box { background: #0f1013; }
+/* 深色补充覆盖：列表/搜索页、分段按钮、徽章、封面底色等未随主题切换的元素 */
+html[data-theme="dark"] .type-seg { background: #262a33; border-color: #3a3f4b; }
+html[data-theme="dark"] .seg-btn { color: var(--sub); }
+html[data-theme="dark"] .seg-btn.active { background: #313642; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+html[data-theme="dark"] .login-badge { background: #262a33; color: var(--sub); border-color: #3a3f4b; }
+html[data-theme="dark"] .list-cover { background: #2a2e38; }
+html[data-theme="dark"] .list-table tr:nth-child(even) { background: #1b1e24; }
+html[data-theme="dark"] .list-table td { border-color: var(--line); }
+/* 高优先级深色覆盖：输入框 / danger 按钮 / 历史条目等仍残留浅色的元素 */
+html[data-theme="dark"] #url-input,
+html[data-theme="dark"] #url-input:focus,
+html[data-theme="dark"] #custom-proxy,
+html[data-theme="dark"] #clip-input,
+html[data-theme="dark"] #pager-input,
+html[data-theme="dark"] .opt-row input[type="text"],
+html[data-theme="dark"] .opt-row input[type="time"],
+html[data-theme="dark"] #proxy-port { background: #262a33; color: var(--text); border-color: #3a3f4b; }
+html[data-theme="dark"] .mini-btn.danger { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
+html[data-theme="dark"] .mini-btn.danger:hover { background: #4a2830; }
+html[data-theme="dark"] .hist-item { background: #1f2229; border-color: var(--line); }
+html[data-theme="dark"] .hist-item .hist-actions button { background: #262a33; color: var(--text); border-color: #3a3f4b; }
+html[data-theme="dark"] .hist-item .hist-actions button.danger { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
 
 /* 无障碍（优化15）：键盘焦点可见 */
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
@@ -1027,9 +1049,9 @@ body.no-select { user-select: none; }
 .list-sub { color: var(--muted, #888); font-size: 12px; margin-bottom: 10px; }
 .list-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .list-toolbar-spacer { flex: 1; }
-.list-table-wrap { flex: 1; overflow-y: auto; background: var(--card-bg, #fff); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
+.list-table-wrap { flex: 1; overflow-y: auto; background: var(--card); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
 .list-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.list-table th { position: sticky; top: 0; background: var(--card-bg, #fff); text-align: left; padding: 10px 10px; font-size: 12px; color: var(--muted, #888); border-bottom: 1px solid var(--border, #e3e6ee); z-index: 1; }
+.list-table th { position: sticky; top: 0; background: var(--card); text-align: left; padding: 10px 10px; font-size: 12px; color: var(--muted, #888); border-bottom: 1px solid var(--border, #e3e6ee); z-index: 1; }
 .list-table td { padding: 8px 10px; border-bottom: 1px solid var(--border, #f0f1f5); vertical-align: middle; font-size: 13px; }
 .list-table tbody tr { cursor: pointer; }
 .list-table tbody tr:hover { background: var(--hover, #f6f8ff); }
@@ -1078,10 +1100,10 @@ body.no-select { user-select: none; }
 .task-status.queued { color: #b8860b; }
 
 /* 列表面板下载选项行 */
-.list-options { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 12px; background: var(--card-bg, #fff); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
+.list-options { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 12px; background: var(--card); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
 .list-options .opt-row { margin: 0; }
 .list-options label { font-size: 12px; color: var(--muted, #888); margin-right: 4px; }
-.list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card-bg, #fff); font-size: 12px; }
+.list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card); font-size: 12px; }
 
 /* 覆盖面板（列表 / 批量）打开时：任务卡悬浮于底部可见 */
 body.overlay-active .tasks-card {
