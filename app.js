@@ -911,6 +911,59 @@
     // 显示返回列表按钮
     ensureDetailBackBtn();
   }
+  /* ---------- 在线播放：默认 1080P（未登录时服务端自动降级 720P） ---------- */
+  function playOnlineVideo() {
+    if (!current || !current.bvid) { showToast('当前无视频信息', 'warn'); return; }
+    if (!playerModal || !playerVideo) { showToast('当前环境不支持在线播放', 'warn'); return; }
+    showToast('正在获取在线播放地址（默认 1080P）…', 'ok');
+    // 优先 DASH 视频流（fMP4，1080P；未登录时服务端自动降 720P），video 可直接播放；
+    // 降级链：1080P DASH → 1080P MP4 → 720P DASH → 720P MP4
+    var tryDash = function (qn) {
+      return fetchPlayurl(4048, qn, current).then(function (data) {
+        var arr = (data && data.dash && data.dash.video) || [];
+        if (!arr.length) throw new Error('该视频暂无 DASH 视频流');
+        var v = arr[0];
+        openOnlinePlayer(v.baseUrl || (v.backupUrl && v.backupUrl[0]), current.title);
+      });
+    };
+    var tryMp4 = function (qn) {
+      return fetchPlayurl(16, qn, current).then(function (data) {
+        if (!data || !data.durl || !data.durl.length) throw new Error('该视频暂无可播放地址');
+        openOnlinePlayer(data.durl[0].url, current.title);
+      });
+    };
+    tryDash(80).catch(function () { return tryMp4(80); }).catch(function () {
+      return tryDash(64).catch(function () { return tryMp4(64); });
+    }).catch(function (e2) {
+      showToast('在线播放失败：' + (e2 && e2.message || '网络错误'), 'fail');
+    });
+  }
+  function openOnlinePlayer(url, title) {
+    playerVideo.pause();
+    playerVideo.removeAttribute('src');
+    playerVideo.load();
+    var triedFallback = false;
+    var viaProxy = proxyBase() + '/stream?url=' + encodeURIComponent(url);
+    // 优先本机代理流（带设备身份 / 登录 Cookie，可解锁更高清晰度）；失败回退 B 站直链
+    playerVideo.onerror = function () {
+      if (!triedFallback) {
+        triedFallback = true;
+        playerVideo.onerror = null;
+        playerVideo.src = url;
+        playerVideo.play().catch(function () { });
+      }
+    };
+    playerVideo.src = viaProxy;
+    playerModal.hidden = false;
+    if (playerTitle) playerTitle.textContent = '在线播放：' + (title || '');
+    playerVideo.play().catch(function () { });
+  }
+  var coverPlayBtn = $('cover-play-btn');
+  if (coverPlayBtn) coverPlayBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    playOnlineVideo();
+  });
+
   function ensureDetailBackBtn() {
     if (!listBack) return;
     if (!document.getElementById('detail-back-btn')) {
@@ -930,6 +983,14 @@
       });
       var wrap = $('opt-actions');
       if (wrap) wrap.appendChild(b);
+      // 「返回列表」旁新增「在线播放」
+      var p = document.createElement('button');
+      p.type = 'button';
+      p.id = 'play-online-btn';
+      p.className = 'mini-btn list-detail-back';
+      p.textContent = '▶ 在线播放';
+      p.addEventListener('click', playOnlineVideo);
+      wrap.appendChild(p);
     }
   }
   // 勾选一键下载：每个勾选视频以「单个视频下载」方式加入下载队列（并发由调度器控制）
@@ -3917,7 +3978,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.2';
+  var APP_VERSION = '1.6.3';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

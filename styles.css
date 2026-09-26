@@ -389,6 +389,23 @@ body.no-select { user-select: none; }
   background: #f0f1f3;
   flex: none;
 }
+.cover-wrap:hover .cover-play-btn { opacity: 1; pointer-events: auto; }
+.cover-play-btn {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 56px; height: 56px;
+  margin: -28px 0 0 -28px;
+  border: none; border-radius: 50%;
+  background: rgba(0,0,0,.55);
+  color: #fff; font-size: 22px;
+  line-height: 1; padding-left: 4px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .15s, background .15s;
+  z-index: 2;
+}
+.cover-play-btn:hover { background: rgba(251,114,153,.9); transform: scale(1.08); }
 .cover-wrap img { width: 100%; height: 100%; object-fit: cover; }
 .video-meta { flex: 1; min-width: 0; }
 .v-title {
