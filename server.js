@@ -384,7 +384,7 @@ function handleRequest(req, res) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.end(data); return;
   }
-  var supplied = Buffer.from(String(req.headers['x-bili-token'] || ''));
+  var supplied = Buffer.from(String(req.headers['x-bili-token'] || q.token || ''));
   var expected = Buffer.from(accessToken);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return sendJson(res, 401, { ok: false, error: '代理认证失败，请使用客户端或本地代理主页' });
   if (q.url) {

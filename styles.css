@@ -384,6 +384,7 @@ body.no-select { user-select: none; }
 /* ---------- 视频卡片（紧凑） ---------- */
 .video-card { display: flex; gap: 12px; }
 .cover-wrap {
+  position: relative;
   width: 120px; height: 76px;
   border-radius: 8px; overflow: hidden;
   background: #f0f1f3;
@@ -580,6 +581,7 @@ body.no-select { user-select: none; }
   left: 50%;
   transform: translateX(-50%);
   z-index: 200;
+  pointer-events: none;
   background: rgba(31, 35, 41, 0.92);
   color: #fff;
   font-size: 13px;

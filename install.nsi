@@ -2,7 +2,7 @@
 Unicode true
 !define APP_NAME "哔哩下载器"
 !define APP_EXE "哔哩下载器.exe"
-!define APP_VERSION "1.6.3"
+!define APP_VERSION "1.6.4"
 !define APP_ID "BiliDownloader"
 
 Name "${APP_NAME}"

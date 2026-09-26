@@ -922,7 +922,12 @@
       return fetchPlayurl(4048, qn, current).then(function (data) {
         var arr = (data && data.dash && data.dash.video) || [];
         if (!arr.length) throw new Error('该视频暂无 DASH 视频流');
-        var v = arr[0];
+        // 按 B 站实际返回 quality 匹配流（未登录 qn=80 时返回 720P/480P，选返回的最高档），
+        // 不再固定取 video[0]（可能是最低清晰度流）
+        var q = (data && data.quality) || qn;
+        var v = null;
+        for (var i = 0; i < arr.length; i++) { if (arr[i].id <= q) v = arr[i]; else break; }
+        if (!v) v = arr[arr.length - 1] || arr[0];
         openOnlinePlayer(v.baseUrl || (v.backupUrl && v.backupUrl[0]), current.title);
       });
     };
@@ -943,20 +948,26 @@
     playerVideo.removeAttribute('src');
     playerVideo.load();
     var triedFallback = false;
-    var viaProxy = proxyBase() + '/stream?url=' + encodeURIComponent(url);
-    // 优先本机代理流（带设备身份 / 登录 Cookie，可解锁更高清晰度）；失败回退 B 站直链
-    playerVideo.onerror = function () {
-      if (!triedFallback) {
-        triedFallback = true;
-        playerVideo.onerror = null;
-        playerVideo.src = url;
-        playerVideo.play().catch(function () { });
-      }
+    // 优先本机代理流（带设备身份 / 登录 Cookie，可解锁更高清晰度，且代理转发带 B 站 Referer 规避防盗链）
+    // video 标签无法携带自定义请求头，故通过 ?token= 参数完成代理认证
+    var viaProxy = function (tok) {
+      return proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
     };
-    playerVideo.src = viaProxy;
-    playerModal.hidden = false;
-    if (playerTitle) playerTitle.textContent = '在线播放：' + (title || '');
-    playerVideo.play().catch(function () { });
+    getProxyAuth().then(function (auth) {
+      var tok = auth && auth.token ? auth.token : '';
+      playerVideo.onerror = function () {
+        if (!triedFallback) {
+          triedFallback = true;
+          playerVideo.onerror = null;
+          playerVideo.src = url;
+          playerVideo.play().catch(function () { });
+        }
+      };
+      playerVideo.src = viaProxy(tok);
+      playerModal.hidden = false;
+      if (playerTitle) playerTitle.textContent = '在线播放：' + (title || '');
+      playerVideo.play().catch(function () { });
+    });
   }
   var coverPlayBtn = $('cover-play-btn');
   if (coverPlayBtn) coverPlayBtn.addEventListener('click', function (e) {
@@ -1349,7 +1360,7 @@
   }
   function dlCacheKey(bvid, cid, fnval, qn, enc) {
     // 缓存键含登录 UID：未登录时缓存的低清直链，登录后不会复用（反之亦然）；编码偏好不同时缓存隔离
-    return bvid + ':' + cid + ':' + fnval + ':' + (qn || 0) + ':' + (enc || '') + ':' + (currentUid || '');
+    return bvid + ':' + cid + ':' + fnval + ':' + (qn || 0) + ':' + (enc || '') + ':' + (currentUid || (loginLogged ? 'L' : ''));
   }
   function getDlCache(key) {
     var e = dlCache[key];
@@ -1954,6 +1965,11 @@
     if (mainContainer) mainContainer.hidden = true;
     if (settingsPanel) settingsPanel.hidden = true;
     if (settingsMask) settingsMask.hidden = true;
+    if (queuePanel) queuePanel.hidden = true;
+    if (listPanel) listPanel.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    document.body.classList.remove('overlay-active');
     renderHistory();
   }
   function closeHistoryPanel() {
@@ -2676,6 +2692,9 @@
       setTaskStatus(task, 'running', '正在获取下载地址…');
       durlPromise = fetchPlayurl(16, qn, current).then(function (data) {
         if (task.cancelled) throw new Error('已取消');
+        if (data && data.quality && qn && data.quality < qn) {
+          setTaskNote(task, 'warn', '当前账号该清晰度受限（未登录或非会员），B 站实际返回 ' + qnName(data.quality) + '，已自动降级');
+        }
         if (data.durl && data.durl.length) return data;
         // 降级 fnval=1 兼容格式
         return fetchPlayurl(1, qn, current).then(function (d2) {
@@ -3015,9 +3034,11 @@
   /* ---------- 设置：登录 ---------- */
   /* ---------- 登录状态 ---------- */
   var currentUid = null;   // 当前登录 UID（用于下载地址缓存隔离）
+  var loginLogged = false; // 已登录标志（uid 可能为空时的兜底指纹）
 
   function renderLoginState(info) {
     var logged = !!(info && info.logged);
+    loginLogged = logged;
     var uid = info && info.uid ? String(info.uid) : '';
     if (currentUid !== null && uid !== currentUid) {
       // 登录 / 退出切换：清空下载地址缓存，避免复用旧账号（或未登录）的低清直链
@@ -3242,6 +3263,14 @@
   function openSettings() {
     settingsPanel.hidden = false;
     settingsMask.hidden = false;
+    // 互斥：关闭其他面板（队列/历史/列表/批量/详情），保证从任意界面都能稳定打开设置
+    if (historyPanel) historyPanel.hidden = true;
+    if (queuePanel) queuePanel.hidden = true;
+    if (listPanel) listPanel.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    if (mainContainer) mainContainer.hidden = true;
+    document.body.classList.remove('overlay-active');
     refreshLoginState();
     updateDlCacheCount();
     refreshDlDir();
@@ -3978,7 +4007,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.3';
+  var APP_VERSION = '1.6.4';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
