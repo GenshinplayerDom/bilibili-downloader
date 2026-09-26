@@ -731,6 +731,7 @@
     renderListTable();
     listPanel.hidden = false;
     mainContainer.hidden = true;
+    document.body.classList.add('overlay-active');
     if (resultEl) resultEl.hidden = true;
     if (batchPanel) batchPanel.hidden = true;
     if (historyPanel) historyPanel.hidden = true;
@@ -2847,12 +2848,14 @@
     if (batchStart) { batchStart.disabled = false; batchStart.textContent = '开始批量下载'; }
     batchPanel.hidden = false;
     if (mainContainer) mainContainer.hidden = true;
+    document.body.classList.add('overlay-active');
     if (settingsPanel) settingsPanel.hidden = true;
     if (settingsMask) settingsMask.hidden = true;
   }
   function closeBatchPanel() {
     batchPanel.hidden = true;
     if (mainContainer) mainContainer.hidden = false;
+    document.body.classList.remove('overlay-active');
   }
   function renderBatchList(states) {
     if (!batchList) return;
@@ -3033,6 +3036,7 @@
   function goHome() {
     if (listPanel) listPanel.hidden = true;
     if (batchPanel) batchPanel.hidden = true;
+    document.body.classList.remove('overlay-active');
     if (historyPanel) historyPanel.hidden = true;
     if (settingsPanel) settingsPanel.hidden = true;
     if (settingsMask) settingsMask.hidden = true;

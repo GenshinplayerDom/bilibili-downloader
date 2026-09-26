@@ -155,16 +155,16 @@
     </div>
   </section>
 
-  <!-- 下载任务（支持同时下载多个视频 / 音频，本次使用期间保留记录） -->
-  <section class="card tasks-card" id="tasks-card" hidden>
-    <div class="tasks-title">下载任务 <span class="tasks-sub">本次使用期间保留</span>
-      <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
-      <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
-    </div>
-    <div class="tasks-list" id="tasks-list"></div>
-  </section>
-
 </main>
+
+<!-- 下载任务（独立于主界面，覆盖面板打开时仍可见） -->
+<section class="card tasks-card" id="tasks-card" hidden>
+  <div class="tasks-title">下载任务 <span class="tasks-sub">本次使用期间保留</span>
+    <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
+    <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
+  </div>
+  <div class="tasks-list" id="tasks-list"></div>
+</section>
 
 <!-- 左下角竖向操作栏（记录 + 设置） -->
 <div class="left-rail">

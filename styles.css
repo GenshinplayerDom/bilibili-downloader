@@ -928,3 +928,16 @@ body {
 .list-options .opt-row { margin: 0; }
 .list-options label { font-size: 12px; color: var(--muted, #888); margin-right: 4px; }
 .list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card-bg, #fff); font-size: 12px; }
+
+/* 覆盖面板（列表 / 批量）打开时：任务卡悬浮于底部可见 */
+body.overlay-active .tasks-card {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 40px));
+  z-index: 65;
+  max-height: 36vh;
+  overflow-y: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+}
