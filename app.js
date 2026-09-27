@@ -220,25 +220,28 @@
       var el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
-    // Android 专用优化：隐藏桌面专属功能（网络重置 / 下载限速 / 代理方式与端口 / 一键修复）
-    var hideIds = ['net-reset-btn', 'net-reset-logs', 'rate-limit', 'proxy-mode', 'proxy-port', 'custom-proxy-block', 'fix-btn', 'speedtest-btn', 'fix-logs'];
-    hideIds.forEach(function (id) {
+    // Android 专用优化：隐藏桌面专属设置（网络重置 / 下载限速 / 代理方式与端口 / 自定义代理），保留代理状态与一键修复
+    ['net-reset-btn', 'net-reset-logs', 'rate-limit', 'proxy-mode', 'proxy-port', 'custom-proxy-block', 'custom-proxy'].forEach(function (id) {
       var el = document.getElementById(id);
-      if (el) el.closest('.set-block, .set-row, section') && el.parentNode && el.parentNode.parentNode && el.parentNode.parentNode.classList && el.parentNode.parentNode.classList.contains('set-section') && el.parentNode.parentNode.hidden !== undefined
-        ? el.parentNode.parentNode.hidden = false : 0;
-      if (el) el.hidden = true;
-      var row = el && (el.closest('.set-row') || el.closest('.set-block'));
-      if (row && row.parentNode && row.parentNode.tagName === 'SECTION') { /* 保留区块结构 */ }
-      if (el && el.id === 'rate-limit') {
+      if (!el) return;
+      if (el.id === 'rate-limit') {
         var row2 = el.closest('.set-row');
         if (row2) row2.hidden = true;
+        return;
       }
+      el.hidden = true;
     });
-    // 代理区块整段隐藏（Android 内置代理，无需设置）
+    // 代理区块：仅隐藏模式/端口/自定义相关行，保留「代理状态 / 一键修复 / 测速」
     var proxySection = document.querySelector('.settings-panel .set-section:first-of-type');
     if (proxySection) {
       var head = proxySection.querySelector('h3');
-      if (head && head.textContent.indexOf('代理') >= 0) proxySection.hidden = true;
+      if (head && head.textContent.indexOf('代理') >= 0) {
+        var rows = proxySection.querySelectorAll('.set-block, .set-row, .fix-logs');
+        for (var ri = 0; ri < rows.length; ri++) {
+          var t = rows[ri].textContent || '';
+          if (t.indexOf('模式') >= 0 || t.indexOf('端口') >= 0 || t.indexOf('自定义地址') >= 0) rows[ri].hidden = true;
+        }
+      }
     }
     // 网络重置区块整段隐藏
     var secs = document.querySelectorAll('.settings-panel .set-section');
@@ -966,9 +969,9 @@
     if (!current || !current.bvid) { showToast('当前无视频信息', 'warn'); return; }
     if (!playerModal || !playerVideo) { showToast('当前环境不支持在线播放', 'warn'); return; }
     showToast('正在获取在线播放地址（默认 1080P）…', 'ok');
-    // 优先 MP4（durl 合流，含音频轨道，在线播放有声音）；
-    // DASH 为分离流（视频流无音频轨道，仅当无 MP4 时兜底）。
-    // 降级链：1080P MP4 → 1080P DASH → 720P MP4 → 720P DASH
+    // 在线播放全走 MP4（durl 合流，含音频轨道，确保有声音）；
+    // DASH 为分离流（视频流无音频轨道），仅当全部 MP4 失败时兜底（有画面）。
+    // 降级链：1080P MP4 → 720P MP4 → 480P MP4 → 720P DASH（无声）
     var tryDash = function (qn) {
       return fetchPlayurl(4048, qn, current).then(function (data) {
         var arr = (data && data.dash && data.dash.video) || [];
@@ -989,10 +992,14 @@
         openOnlinePlayer(data.durl[0].url, current.title);
       });
     };
-    tryMp4(80).catch(function () { return tryDash(80); }).catch(function () {
-      return tryMp4(64).catch(function () { return tryDash(64); });
+    // 全 MP4（合流含音频）降级链：1080P → 720P → 480P，确保在线播放有声音；
+    // DASH（分离流无声）仅作为最后兜底（部分视频无 MP4 流时保证有画面）
+    tryMp4(80).catch(function () { return tryMp4(64); }).catch(function () {
+      return tryMp4(32);
     }).catch(function (e2) {
-      showToast('在线播放失败：' + (e2 && e2.message || '网络错误'), 'fail');
+      return tryDash(64).catch(function () {
+        showToast('在线播放失败：' + (e2 && e2.message || '网络错误'), 'fail');
+      });
     });
   }
   function showPlayerError(msg) {
@@ -1007,8 +1014,8 @@
     var qn, fnval;
     if (depth === 0) { qn = 80; fnval = 16; }      // 1080P MP4（合流有声）
     else if (depth === 1) { qn = 64; fnval = 16; } // 720P MP4（合流有声）
-    else if (depth === 2) { qn = 64; fnval = 4048; } // 720P DASH（分离流兜底）
-    else { qn = 32; fnval = 4048; }                  // 480P DASH（分离流兜底）
+    else if (depth === 2) { qn = 32; fnval = 16; } // 480P MP4（合流有声）
+    else { qn = 64; fnval = 4048; }                 // 720P DASH（分离流无声，最后兜底）
     fetchPlayurl(fnval, qn, current).then(function (data) {
       if (fnval === 4048) {
         var arr = (data && data.dash && data.dash.video) || [];
@@ -4438,7 +4445,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.9';
+  var APP_VERSION = '1.6.10';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

@@ -22,6 +22,8 @@ html[data-theme="dark"] {
   --text: #e6e8eb;
   --sub: #9aa0aa;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  /* 原生控件深色：select 展开面板、滚动条等自动跟随深色主题 */
+  color-scheme: dark;
 }
 html[data-theme="dark"] body { background: var(--bg); }
 html[data-theme="dark"] .card,
