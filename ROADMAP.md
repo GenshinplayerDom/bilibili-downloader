@@ -2,6 +2,11 @@
 
 本表替代此前“全部实施”的笼统声明，以代码实际能力为准。
 
+## v1.6.14 已完成
+- 修复夜间模式列表高亮（仔细检查）：根因是 --hover/--checked 变量未定义，深色下回退浅蓝白（hover 行 #f6f8ff / 勾选行 #eef3ff）；在 :root 与深色块补齐定义，深色 hover 行改为中性灰度 #242832（实测 rgb(36,40,50)），勾选行 #2a2e38。
+- 修复部分鼠标指针悬停无响应：列表行 hover 现在有可见灰度反馈（含深色）；勾选区域（col-check）增加 hover 微亮反馈 + cursor:pointer；其余按钮/封面/分页 hover 复核正常。
+- 修复在线播放无声音（确认完成）：根因是在线播放请求 fnval=16（含 DASH 标志），B 站对部分视频返回的 durl 只有视频轨（无声）；改为 fnval=1（传统 MP4 合流，必含音频轨）——tryMp4 与播放器降级链前三档均改 fnval=1（1080/720/480），DASH+audio 仅作最后兜底。实测播放正常（readyState 4）。
+
 ## v1.6.13 已完成
 - 修复弹幕/字幕仍不可用：B 站弹幕接口（dm/list.so）即使请求 identity 仍返回 deflate/gzip 压缩，下载后为乱码；主进程直连下载改为全量缓冲后按 Content-Encoding 同步解压（gzip→gunzip，deflate→inflate/inflateRaw 回退），弹幕 XML 实测有效；字幕文件走同一通道同样解压。
 - 修复在线播放无音频（仔细检查）：主路径 MP4 代理流实测可正常出声；DASH 兜底的 audio 元素增强——音量/静音跟随主播放器、play 被 autoplay 策略拦截时延迟重试 + video play/playing 事件内再次尝试。

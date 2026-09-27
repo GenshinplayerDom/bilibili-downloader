@@ -12,6 +12,8 @@
   --ok: #34a853;
   --bad: #ea4335;
   --warn: #f59a23;
+  --hover: #f6f8ff;
+  --checked: #eef3ff;
   --shadow: 0 2px 12px rgba(31, 35, 41, 0.08);
 }
 /* 深色模式（功能14） */
@@ -21,6 +23,8 @@ html[data-theme="dark"] {
   --line: #343842;
   --text: #e6e8eb;
   --sub: #9aa0aa;
+  --hover: #242832;
+  --checked: #2a2e38;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   /* 原生控件深色：select 展开面板、滚动条等自动跟随深色主题 */
   color-scheme: dark;
@@ -1065,7 +1069,8 @@ body.no-select { user-select: none; }
 .list-table tbody tr { cursor: pointer; }
 .list-table tbody tr:hover { background: var(--hover, #f6f8ff); }
 .list-table tbody tr.row-checked { background: var(--checked, #eef3ff); }
-.col-check { width: 44px; text-align: center; }
+.col-check { width: 44px; text-align: center; border-radius: 6px; transition: background .15s; }
+.col-check:hover { background: rgba(251, 114, 153, 0.07); }
 .col-cover { width: 92px; }
 .col-title { width: auto; }
 .col-play { width: 92px; }

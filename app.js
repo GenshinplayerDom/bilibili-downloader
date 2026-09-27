@@ -997,7 +997,9 @@
       });
     };
     var tryMp4 = function (qn) {
-      return fetchPlayurl(16, qn, current).then(function (data) {
+      // fnval=1：传统 MP4 合流（必含音频轨），确保在线播放有声音；
+      // fnval=16（DASH 标志）对部分视频返回的 durl 可能只有视频轨（无声）
+      return fetchPlayurl(1, qn, current).then(function (data) {
         if (!data || !data.durl || !data.durl.length) throw new Error('该视频暂无可播放地址');
         openOnlinePlayer(data.durl[0].url, current.title);
       });
@@ -1063,9 +1065,9 @@
     depth = depth || 0;
     if (depth > 3) { showPlayerError('播放失败：无法获取可播放的视频流，请检查网络或稍后重试'); return; }
     var qn, fnval;
-    if (depth === 0) { qn = 80; fnval = 16; }      // 1080P MP4（合流有声）
-    else if (depth === 1) { qn = 64; fnval = 16; } // 720P MP4（合流有声）
-    else if (depth === 2) { qn = 32; fnval = 16; } // 480P MP4（合流有声）
+    if (depth === 0) { qn = 80; fnval = 1; }       // 1080P MP4 合流（必含音频轨）
+    else if (depth === 1) { qn = 64; fnval = 1; }  // 720P MP4 合流（必含音频轨）
+    else if (depth === 2) { qn = 32; fnval = 1; }  // 480P MP4 合流（必含音频轨）
     else { qn = 64; fnval = 4048; }                 // 720P DASH（分离流无声，最后兜底）
     fetchPlayurl(fnval, qn, current).then(function (data) {
       if (fnval === 4048) {
@@ -4505,7 +4507,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.13';
+  var APP_VERSION = '1.6.14';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
