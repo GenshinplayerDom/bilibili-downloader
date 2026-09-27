@@ -1021,8 +1021,11 @@
         playerAudio = new Audio();
         playerAudio.style.display = 'none';
         document.body.appendChild(playerAudio);
-        // 与 video 播放/暂停同步
-        playerVideo.addEventListener('play', function () { try { if (playerAudio && playerAudio.src) playerAudio.play().catch(function () { }); } catch (e) { } });
+        // 与 video 播放/暂停/音量同步；play/playing 事件内重试（处于用户手势链，避免 autoplay 拦截）
+        var syncAudio = function () { try { if (playerAudio && playerAudio.src) { playerAudio.muted = playerVideo.muted; playerAudio.volume = playerVideo.volume; playerAudio.play().catch(function () { }); } } catch (e) { } };
+        playerVideo.addEventListener('play', syncAudio);
+        playerVideo.addEventListener('playing', syncAudio);
+        playerVideo.addEventListener('volumechange', function () { try { if (playerAudio) { playerAudio.muted = playerVideo.muted; playerAudio.volume = playerVideo.volume; } } catch (e) { } });
         playerVideo.addEventListener('pause', function () { try { if (playerAudio) playerAudio.pause(); } catch (e) { } });
         playerVideo.addEventListener('ended', function () { try { if (playerAudio) playerAudio.pause(); } catch (e) { } });
       }
@@ -1031,8 +1034,13 @@
       };
       getProxyAuth().then(function (auth) {
         var tok = auth && auth.token ? auth.token : '';
+        playerAudio.muted = playerVideo.muted;
+        playerAudio.volume = playerVideo.volume;
         playerAudio.src = viaAudioProxy(tok);
-        playerAudio.play().catch(function () { });
+        playerAudio.play().catch(function () {
+          // 首次 play 可能被 autoplay 拦截：video 播放事件内会再次尝试，这里延迟补一次
+          setTimeout(function () { try { if (playerAudio && playerAudio.src && !playerVideo.paused) playerAudio.play().catch(function () { }); } catch (e) { } }, 600);
+        });
       });
     } catch (e) { }
   }
@@ -4497,7 +4505,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.12';
+  var APP_VERSION = '1.6.13';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

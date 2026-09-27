@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, session, dialog, shell, safeStorage } = req
 const path = require('path');
 if (process.env.BILI_DATA_DIR) app.setPath('userData', path.resolve(process.env.BILI_DATA_DIR));
 const fs = require('fs');
+const zlib = require('zlib');
 const https = require('https');
 const childProcess = require('child_process');
 const proxy = require('./server.js');
@@ -278,11 +279,21 @@ function directDownload(url, dest) {
         res.destroy();
         return reject(new Error('下载失败（HTTP ' + res.statusCode + '）'));
       }
-      const out = fs.createWriteStream(dest);
-      res.pipe(out);
-      out.on('finish', () => { out.close(); resolve(); });
-      out.on('error', reject);
+      // B 站部分接口（如弹幕 dm/list.so）即使请求 identity 仍返回 gzip/deflate：全量缓冲后同步解压写入
+      const encoding = String(res.headers['content-encoding'] || '').toLowerCase();
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
       res.on('error', reject);
+      res.on('end', () => {
+        try {
+          let buf = Buffer.concat(chunks);
+          if (encoding.indexOf('gzip') >= 0) buf = zlib.gunzipSync(buf);
+          else if (encoding.indexOf('deflate') >= 0) {
+            try { buf = zlib.inflateSync(buf); } catch (e) { buf = zlib.inflateRawSync(buf); }
+          }
+          fs.writeFile(dest, buf, (err) => err ? reject(err) : resolve());
+        } catch (e) { reject(e); }
+      });
     });
     req.on('error', reject);
     req.setTimeout(30000, () => req.destroy(new Error('下载超时')));
@@ -350,13 +361,18 @@ async function muxDownload(payload) {
     sendProgress('bili:mux-progress', { token, frac: .9, speed: 0, stage: '正在合并音视频', phase: 'merging' });
     const start = Number(payload.start) || 0, end = Number(payload.end) || 0;
     if (start < 0 || end < 0 || (end && end <= start)) throw new Error('无效的片段时间');
-    // -ss 置于输入前（input seek）：从最近关键帧开始输出，避免 -c copy 下 seek 点非关键帧导致开头卡首帧；
-    // 全局选项对 video/audio 双输入同时生效，保持音视频同步
+    // 片段裁剪：-ss 置于输入前（input seek，视频从最近关键帧开始输出，避免 -c copy 下开头卡首帧）；
+    // 音频从更早位置开始（前移 3s），保证音频覆盖视频起点，避免片段开头无声；-t 相应加长覆盖到 end
     let args = ['-y'];
-    if (start) args.push('-ss', String(start));
+    if (start > 0) {
+      args.push('-ss', String(Math.max(0, start - 3)));
+      if (end) args.push('-t', String(end - start + 4));
+    } else if (end) {
+      args.push('-t', String(end));
+    }
     args.push('-i', video);
     if (audioUrls.length) args.push('-i', audio);
-    if (end) args.push('-t', String(end - start));
+    args.push('-c', 'copy');
     args.push('-c', 'copy');
     if (path.extname(outPath).toLowerCase() === '.mp4') args.push('-movflags', '+faststart');
     const staged = path.join(tmpDir, 'output' + path.extname(outPath));
