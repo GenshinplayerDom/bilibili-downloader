@@ -1002,6 +1002,39 @@
       });
     });
   }
+  /* ---------- 在线播放音频：DASH 分离流时用 audio 元素同步播放音频轨道 ---------- */
+  var playerAudio = null;
+  function playAudioStream(url) {
+    if (!url) return;
+    try {
+      if (!playerAudio) {
+        playerAudio = new Audio();
+        playerAudio.style.display = 'none';
+        document.body.appendChild(playerAudio);
+        // 与 video 播放/暂停同步
+        playerVideo.addEventListener('play', function () { try { if (playerAudio && playerAudio.src) playerAudio.play().catch(function () { }); } catch (e) { } });
+        playerVideo.addEventListener('pause', function () { try { if (playerAudio) playerAudio.pause(); } catch (e) { } });
+        playerVideo.addEventListener('ended', function () { try { if (playerAudio) playerAudio.pause(); } catch (e) { } });
+      }
+      var viaAudioProxy = function (tok) {
+        return proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
+      };
+      getProxyAuth().then(function (auth) {
+        var tok = auth && auth.token ? auth.token : '';
+        playerAudio.src = viaAudioProxy(tok);
+        playerAudio.play().catch(function () { });
+      });
+    } catch (e) { }
+  }
+  function stopAudioStream() {
+    if (playerAudio) { try { playerAudio.pause(); playerAudio.removeAttribute('src'); } catch (e) { } }
+  }
+  // 播放成功：清除"正在获取在线播放地址"提示
+  (function () {
+    if (!playerVideo) return;
+    playerVideo.addEventListener('playing', function () { showToast('正在播放', 'ok'); });
+  })();
+
   function showPlayerError(msg) {
     if (playerTitle) playerTitle.textContent = msg;
     if (playerVideo) { playerVideo.pause(); playerVideo.removeAttribute('src'); playerVideo.load(); }
@@ -1025,10 +1058,15 @@
         var v = cand.length ? cand.reduce(function (a, b) { return a.id > b.id ? a : b; }) : arr[0];
         if (!v || !v.baseUrl) throw new Error('DASH 地址为空');
         playerVideo.src = v.baseUrl || (v.backupUrl && v.backupUrl[0]);
+        // DASH 分离流无声：同步播放音频流（audio 元素），保证在线播放始终有声音
+        var aArr = (data && data.dash && data.dash.audio) || [];
+        var au = aArr.length ? (aArr[0].baseUrl || (aArr[0].backupUrl && aArr[0].backupUrl[0])) : '';
+        if (au) playAudioStream(au); else stopAudioStream();
         if (playerTitle) playerTitle.textContent = '在线播放（已降级·视频流无音频，建议 MP4 或下载）：' + (title || '');
       } else {
         if (!data || !data.durl || !data.durl.length) throw new Error('无 MP4 流');
         playerVideo.src = data.durl[0].url;
+        stopAudioStream();
         if (playerTitle) playerTitle.textContent = '在线播放（已降级）：' + (title || '');
       }
       playerVideo.play().catch(function () { });
@@ -1039,6 +1077,7 @@
     });
   }
   function openOnlinePlayer(url, title) {
+    stopAudioStream();
     playerVideo.pause();
     playerVideo.removeAttribute('src');
     playerVideo.load();
@@ -4445,7 +4484,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.10';
+  var APP_VERSION = '1.6.11';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
