@@ -554,8 +554,10 @@
   /* ---------- 主流程 ---------- */
   function startParse(text) {
     if (busy) return;
-    // 新链接解析：清空上一个视频残留的片段选择
+    // 新链接解析：清空上一个视频残留的片段选择与定时
     if (clipInput) clipInput.value = '';
+    if (timerInput) timerInput.value = '';
+    if (timerCheck) timerCheck.checked = false;
     var parsed = parseLink(text);
     if (!parsed) {
       setFinderState('error');
@@ -725,6 +727,10 @@
   function selectPage(idx) {
     var p = current.pages[idx];
     current.pageIndex = idx;
+    // 切换分 P：重置片段与定时（不同 P 的时间轴独立）
+    if (clipInput) clipInput.value = '';
+    if (timerInput) timerInput.value = '';
+    if (timerCheck) timerCheck.checked = false;
     // 收藏夹 / 合集每个 P 可能是独立视频（独立 bvid），需一并切换
     if (p.bvid) current.bvid = p.bvid;
     if (p.aid) current.aid = p.aid;
@@ -955,6 +961,10 @@
     // 列表项若有 cid 直接写入，避免重复补全
     if (item.cid) current.cid = item.cid;
     if (current.pages[0] && !current.pages[0].cid && item.cid) current.pages[0].cid = item.cid;
+    // 进入单个视频详情：重置上一个视频残留的片段选择与定时
+    if (clipInput) clipInput.value = '';
+    if (timerInput) timerInput.value = '';
+    if (timerCheck) timerCheck.checked = false;
     listPanel.hidden = true;
     mainContainer.hidden = false;
     resultEl.hidden = false;
@@ -3010,7 +3020,10 @@
       var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
       return apiGet('https://api.bilibili.com/x/player/v2?' + q).then(function (j) {
         var subs = (j && j.subtitle && j.subtitle.subtitles) || [];
-        return (subs.length && subs[0].subtitle_url) ? subs[0].subtitle_url : null;
+        if (!subs.length || !subs[0].subtitle_url) return null;
+        var subUrl = subs[0].subtitle_url;
+        if (subUrl.indexOf('//') === 0) subUrl = 'https:' + subUrl;
+        return subUrl;
       }).catch(function () { return null; });
     }).catch(function () { return Promise.resolve(null); });
   }
@@ -4484,7 +4497,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.11';
+  var APP_VERSION = '1.6.12';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

@@ -260,6 +260,35 @@ function ffmpegPath() {
 async function downloadToFile(url, dest, onProgress) {
   await downloader.download([url], dest, { threads: 1, onProgress });
 }
+/** 直接下载（弹幕/字幕等非媒体文件）：带 UA/Referer、禁用压缩，不经分片下载器，
+ *  规避 Range/probe/压缩限制导致的失败 */
+function directDownload(url, dest) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === 'http:' ? require('http') : require('https');
+    const req = mod.request({
+      hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.bilibili.com/', 'Accept-Encoding': 'identity' }
+    }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.destroy();
+        return directDownload(new URL(res.headers.location, url).href, dest).then(resolve, reject);
+      }
+      if (res.statusCode !== 200 && res.statusCode !== 206) {
+        res.destroy();
+        return reject(new Error('下载失败（HTTP ' + res.statusCode + '）'));
+      }
+      const out = fs.createWriteStream(dest);
+      res.pipe(out);
+      out.on('finish', () => { out.close(); resolve(); });
+      out.on('error', reject);
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('下载超时')));
+    req.end();
+  });
+}
 function runFfmpeg(args, onProgress, control) {
   return control.run(signal => new Promise((resolve, reject) => {
     const ff = ffmpegPath();
@@ -319,11 +348,14 @@ async function muxDownload(payload) {
     await control.ready();
     control.phase = 'merging';
     sendProgress('bili:mux-progress', { token, frac: .9, speed: 0, stage: '正在合并音视频', phase: 'merging' });
-    let args = ['-y', '-i', video];
-    if (audioUrls.length) args.push('-i', audio);
     const start = Number(payload.start) || 0, end = Number(payload.end) || 0;
     if (start < 0 || end < 0 || (end && end <= start)) throw new Error('无效的片段时间');
+    // -ss 置于输入前（input seek）：从最近关键帧开始输出，避免 -c copy 下 seek 点非关键帧导致开头卡首帧；
+    // 全局选项对 video/audio 双输入同时生效，保持音视频同步
+    let args = ['-y'];
     if (start) args.push('-ss', String(start));
+    args.push('-i', video);
+    if (audioUrls.length) args.push('-i', audio);
     if (end) args.push('-t', String(end - start));
     args.push('-c', 'copy');
     if (path.extname(outPath).toLowerCase() === '.mp4') args.push('-movflags', '+faststart');
@@ -519,13 +551,13 @@ function registerIpc() {
       var dmPath = null;
       if (payload.danmaku !== false) {
         dmPath = security.reserveOutput(dir, base + '.xml');
-        await downloadToFile('https://api.bilibili.com/x/v1/dm/list.so?oid=' + encodeURIComponent(payload.cid), dmPath, null);
+        await directDownload('https://api.bilibili.com/x/v1/dm/list.so?oid=' + encodeURIComponent(payload.cid), dmPath);
       }
       var srtPath = null;
       if (payload.subUrl) {
         srtPath = security.reserveOutput(dir, base + '.srt');
         try {
-          await downloadToFile(payload.subUrl, srtPath, null);
+          await directDownload(payload.subUrl, srtPath);
           var txt = fs.readFileSync(srtPath, 'utf8').trim();
           var j = null;
           try { j = JSON.parse(txt); } catch (e) { }
