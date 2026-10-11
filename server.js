@@ -332,7 +332,7 @@ function apiForward(url) {
   return biliGate(function () { return biliGet(url); }).then(function (r) {
     if (r.status === 412) {
       // 换全新身份重试一次
-      return sleep(1500).then(function () {
+      return sleep(2500).then(function () {
         return resetBuvid().then(function () {
           return biliGate(function () { return biliGet(url); }).then(function (r2) {
             r2.retried = true;
@@ -575,7 +575,8 @@ function handleRequest(req, res) {
     }
     var hdrs = {
       'User-Agent': UA,
-      'Referer': 'https://www.bilibili.com/'
+      'Referer': 'https://www.bilibili.com/',
+      'Cookie': buildCookie()   // CDN 防盗链需要设备身份 + 登录 Cookie，缺失会导致 403
     };
     if (req.headers.range) hdrs.Range = req.headers.range;
     // 流请求不做节流（保证多线程并发下载不被串行拖慢）

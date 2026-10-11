@@ -381,6 +381,7 @@
     }
     if (proxyTip) {
       var tip = '';
+      var tipHtml = null;
       if (!useProxy) {
         proxyTip.className = 'proxy-tip off';
         tip = '已选择直接请求模式：B 站接口默认不允许浏览器跨域直连，若提取失败请改回「自动」并启动本地代理';
@@ -390,12 +391,13 @@
       } else {
         proxyTip.className = 'proxy-tip bad';
         if (!window.biliAPI && !tokenMeta) {
-          tip = '网站端未连接：① 电脑与本机连接同一 WiFi；② 电脑上运行 start-server.bat --lan（Windows）或 node server.js --lan（Mac / Linux）；③ 在下方设置-代理-自定义地址填写 http://<电脑局域网IP>:8123 后刷新本页。若在本机使用可省略 --lan 与自定义地址';
+          var pairBase = (customProxyBase() ? customProxyBase().replace(/\/+$/, '') : 'http://127.0.0.1:8123');
+          tipHtml = '网站端需搭配本机代理并完成一次性授权：① 在电脑上运行 start-server.bat（Windows）或 node server.js（Mac / Linux）；② 在该电脑浏览器 <a href="' + pairBase + '/pair" target="_blank" rel="noopener" style="color:#ff3b7a;font-weight:700;text-decoration:underline;">打开授权页并点击「授权」</a>；③ 回本页刷新。手机使用：电脑改用 start-server.bat --lan（或 node server.js --lan），并在设置-代理-自定义地址填 http://&lt;电脑局域网IP&gt;:8123';
         } else {
-          tip = '代理未连接：请点击下方「一键修复」，或（网页版）运行 start-server.bat 后重试';
+          tip = '代理未连接：请确认本地代理正在运行；网页版若刚重启过代理，请重新打开 http://127.0.0.1:8123/pair 授权后刷新，或点击设置中的「一键修复」';
         }
       }
-      proxyTip.textContent = tip;
+      if (tipHtml) proxyTip.innerHTML = tipHtml; else proxyTip.textContent = tip;
       proxyTip.hidden = false;
     }
   }
@@ -2239,6 +2241,7 @@
       var chunks = [];
       var total = leftFloat.length;
       var i = 0;
+      var lastTick = 0;
       var TARGET_BATCH_MS = 30;
       var blocksPerBatch = 16;
       var MIN_BLOCKS = 4;
@@ -4557,7 +4560,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.7.3';
+  var APP_VERSION = '1.7.4';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
