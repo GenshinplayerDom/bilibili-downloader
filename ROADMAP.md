@@ -2,6 +2,22 @@
 
 本表替代此前“全部实施”的笼统声明，以代码实际能力为准。
 
+## v1.7.3 已完成
+- 网站端代理配对流程重构完善：webPairAuth 统一早退分支（Android 走进程内代理 / 桌面端走 tokenMeta / 网站端走 /web-token 配对），token 缓存命中与失效自愈（403 清除缓存重新获取）。
+- 自 1.7.x 起累计：网站端（GitHub Pages 等静态托管）可连接本机代理（/pair 一键授权 + /web-token 取 token）；网站端设置页显示「自定义代理地址」并隐藏桌面专属项；Android 下载原生中断（cancelDownload 桥）。
+- 桌面端 / Android 在线播放维持 fnval=1 合流有声，深色 hover 灰度等前版修复全部保留。
+
+## v1.7.2 已完成
+- 网站端代理配对流程重构完善：webPairAuth 统一早退分支（Android 走进程内代理 / 桌面端走 tokenMeta / 网站端走 /web-token 配对），token 缓存命中与失效自愈（403 清除缓存重新获取）。
+- 自 1.7.0 起累计：网站端（GitHub Pages 等静态托管）可连接本机代理（/pair 一键授权 + /web-token 取 token）；网站端设置页显示「自定义代理地址」并隐藏桌面专属项；Android 下载原生中断（cancelDownload 桥，下载线程检查取消标记立即中止）。
+- 桌面端 / Android 在线播放维持 fnval=1 合流有声，深色 hover 灰度等前版修复全部保留。
+
+## v1.7.0 已完成
+- 网站端（GitHub Pages / Vercel 等静态托管）支持连接本机代理：新增「显式配对」流程（本机打开 http://127.0.0.1:8123/pair 一键授权 → 网站端 /web-token 获取 token），token 本地缓存；token 失效/未授权时自动清除缓存并重新获取（自愈）。
+- 网站端设置页显示「自定义代理地址」输入框（支持填写电脑局域网地址 http://<电脑局域网IP>:8123），隐藏桌面专属的代理方式/端口；代理提示区分网站端（--lan 启动说明）与桌面端。
+- Android 下载支持原生中断：任务取消时调用 cancelDownload 桥，原生下载线程检查取消标记立即中止并清理。
+- 同步修正：桌面端 / Android 在线播放维持 fnval=1 合流有声，深色 hover 灰度等前版修复全部保留。
+
 ## v1.6.14 已完成
 - 修复夜间模式列表高亮（仔细检查）：根因是 --hover/--checked 变量未定义，深色下回退浅蓝白（hover 行 #f6f8ff / 勾选行 #eef3ff）；在 :root 与深色块补齐定义，深色 hover 行改为中性灰度 #242832（实测 rgb(36,40,50)），勾选行 #2a2e38。
 - 修复部分鼠标指针悬停无响应：列表行 hover 现在有可见灰度反馈（含深色）；勾选区域（col-check）增加 hover 微亮反馈 + cursor:pointer；其余按钮/封面/分页 hover 复核正常。

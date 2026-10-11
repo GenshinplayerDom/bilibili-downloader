@@ -22,10 +22,24 @@ var http = require('http');
 var https = require('https');
 var crypto = require('crypto');
 var urlMod = require('url');
-var pathMod = require('path');
+var pathMod = require("path");
+var os = require("os");
 var fsMod = require('fs');
 var security = require('./lib/security');
 var accessToken = crypto.randomBytes(32).toString('hex');
+var webAuthorized = false;   // 网站端是否已被用户显式授权（配对）
+// 局域网共享模式（--lan 或环境变量 LAN=1）：
+// 让同一 WiFi 下的手机等设备访问电脑上的代理，供网站端使用。
+var LAN_MODE = process.argv.indexOf('--lan') >= 0 || /^(1|true|yes|on)$/i.test(process.env.LAN || '');
+// LAN 模式是用户显式开启的局域网共享：任何能访问到本端口的设备（同网段）均视为可信局域网，
+// 因此放行任意非空 Host / Origin（token 仍为后续鉴权）。
+function isLoopbackOnly(req) {
+  // 仅本机直接访问（无跨域 Origin，且 Host 为 loopback）
+  return !req.headers.origin && /^127\.0\.0\.[123](?::\d+)?$|^localhost(?::\d+)?$/.test(req.headers.host || '');
+}
+function lanAllowed(req) {
+  return LAN_MODE && !!String(req.headers.host || '').trim();
+}
 var onCookiesChanged = null;
 
 var PORT = parseInt(process.env.PORT, 10) || 8123;
@@ -374,8 +388,13 @@ var LISTEN_HOSTS = ['127.0.0.1', '127.0.0.2', '127.0.0.3'];
 function handleRequest(req, res) {
   setCors(res);
   var origin = req.headers.origin;
-  var hostAllowed = /^127\.0\.0\.[123](?::\d+)?$|^localhost(?::\d+)?$/.test(req.headers.host || '');
-  var originAllowed = !origin || origin === 'null' || /^http:\/\/(127\.0\.0\.[123]|localhost):\d+$/.test(origin);
+  var hostAllowed = /^127\.0\.0\.[123](?::\d+)?$|^localhost(?::\d+)?$/.test(req.headers.host || '') || lanAllowed(req);
+  // 允许本机页面（file/loopback）与主流静态托管的网站端（GitHub Pages / Vercel / Netlify / Cloudflare Pages / Surge）；
+  // 局域网共享模式额外允许同网段设备直接访问（Host 为私网 IP）。
+  var originAllowed = !origin || origin === 'null'
+    || /^http:\/\/(127\.0\.0\.[123]|localhost)(?::\d+)?$/.test(origin)
+    || /^https:\/\/([a-z0-9-]+\.)?(github\.io|vercel\.app|netlify\.app|pages\.dev|surge\.sh)(:\d+)?$/.test(origin)
+    || (LAN_MODE && !!origin);
   if (!hostAllowed || !originAllowed) return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
   if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
   if (req.method === 'OPTIONS') {
@@ -400,6 +419,51 @@ function handleRequest(req, res) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.end(data); return;
   }
+  /* ---- 网站端配对（/pair、/authorize-web、/web-token），在 token 检查之前处理 ---- */
+  if (u.pathname === '/pair') {
+    if (!isLoopbackOnly(req) && !lanAllowed(req)) return sendJson(res, 403, { ok: false, error: '配对页只能在本机或局域网内打开' });
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.end('<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>授权网站端</title>'
+      + '<meta name="viewport" content="width=device-width,initial-scale=1"><style>'
+      + 'body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0f1117;color:#e6e8ee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}'
+      + '.box{background:#1a1d27;border:1px solid #2a2e3c;border-radius:16px;padding:36px;max-width:440px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.4)}'
+      + 'h1{font-size:20px;margin:0 0 12px}.p{color:#a0a4b0;font-size:14px;line-height:1.7;margin:0 0 24px}'
+      + 'button{font-size:15px;border:0;border-radius:10px;padding:12px 28px;cursor:pointer;margin:0 6px}'
+      + '.ok{background:#3b82f6;color:#fff}.no{background:#2a2e3c;color:#c0c4d0}'
+      + '.done{color:#4ade80;font-weight:600;margin-top:18px}</style></head><body>'
+      + '<div class="box"><h1>授权网站端连接本地代理</h1>'
+      + '<p class="p">你正在允许部署在 GitHub Pages / Vercel 等静态托管上的「哔哩下载器网站端」连接本机代理。<br>'
+      + '授权后网站端可解析、搜索、下载 B 站视频；登录态 Cookie 仍只保存在本机。<br>'
+      + '如非你本人操作，请点击拒绝。</p>'
+      + (webAuthorized ? '<p class="done">当前状态：已授权（网站端可直接使用）</p>' : '')
+      + '<p><button class="ok" onclick="go(1)">授权</button><button class="no" onclick="go(0)">拒绝</button></p>'
+      + '<p id="r"></p></div>'
+      + '<script>function go(v){fetch("/authorize-web",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow:v===1})})'
+      + '.then(r=>r.json()).then(j=>{document.getElementById("r").className=j.ok?"done":"";'
+      + 'document.getElementById("r").textContent=j.ok?(j.allow?"✅ 已授权，请回到网站端刷新页面":"已拒绝，网站端将无法连接"):"操作失败";})}</script>'
+      + '</body></html>');
+  }
+  if (u.pathname === '/authorize-web' && req.method === 'POST') {
+    if (!isLoopbackOnly(req) && !lanAllowed(req)) return sendJson(res, 403, { ok: false, error: '只能在本机或局域网内授权' });
+    var ab = '';
+    req.on('data', function (c) { ab += c; });
+    return req.on('end', function () {
+      var allow = false;
+      try { allow = !!JSON.parse(ab || '{}').allow; } catch (e) { }
+      webAuthorized = allow;
+      sendJson(res, 200, { ok: true, allow: allow });
+    });
+  }
+  if (u.pathname === '/web-token') {
+    var hostOk2 = /^127\.0\.0\.[123](?::\d+)?$|^localhost(?::\d+)?$/.test(req.headers.host || '') || lanAllowed(req);
+    var webOrigin = origin && /^https:\/\/([a-z0-9-]+\.)?(github\.io|vercel\.app|netlify\.app|pages\.dev|surge\.sh)(:\d+)?$/.test(origin);
+    if (!hostOk2 || !(webOrigin || origin === 'null' || isLoopbackOnly(req))) return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
+    if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
+    if (!webAuthorized) return sendJson(res, 403, { ok: false, error: '网站端尚未授权，请在本机打开 http://127.0.0.1:' + PORT + '/pair 完成授权' });
+    return sendJson(res, 200, { ok: true, token: accessToken, port: PORT });
+  }
+
   var supplied = Buffer.from(String(req.headers['x-bili-token'] || q.token || ''));
   var expected = Buffer.from(accessToken);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return sendJson(res, 401, { ok: false, error: '代理认证失败，请使用客户端或本地代理主页' });
@@ -546,7 +610,10 @@ var servers = [];
 
 function start(port) {
   port = port || PORT;
-  return Promise.allSettled(LISTEN_HOSTS.map(function (host) {
+  // 局域网共享：0.0.0.0 已覆盖本机 loopback 与局域网所有网卡；
+  // 不能再叠加 127.0.0.x（Node 同端口多地址绑定会 EADDRINUSE）。
+  var hosts = LAN_MODE ? ['0.0.0.0'] : LISTEN_HOSTS.slice();
+  return Promise.allSettled(hosts.map(function (host) {
     return new Promise(function (resolve, reject) {
       var s = http.createServer(handleRequest);
       s.once('error', function (e) {
@@ -566,7 +633,24 @@ function start(port) {
     var failed = results.find(function (result) { return result.status === 'rejected'; });
     if (failed) throw failed.reason;
     var list = results.map(function (result) { return result.value; });
-    console.log('哔哩下载器内置代理已启动（' + LISTEN_HOSTS.join(' / ') + ':' + port + '）');
+    console.log('哔哩下载器内置代理已启动（' + hosts.join(' / ') + ':' + port + '）');
+    if (LAN_MODE) {
+      webAuthorized = true;   // 局域网共享模式下，本机启动即视为已授权网站端
+      var addrs = [];
+      try {
+        var ifs = os.networkInterfaces();
+        Object.keys(ifs).forEach(function (name) {
+          (ifs[name] || []).forEach(function (iface) {
+            if (iface && iface.family === 'IPv4' && !iface.internal) addrs.push(iface.address);
+          });
+        });
+      } catch (e) { }
+      console.log('已开启局域网共享：同 WiFi 下手机在网站端设置里填写以下任一地址：');
+      (addrs.length ? addrs : ['（未能枚举局域网 IP，请用 ipconfig / ifconfig 查看）']).forEach(function (a) {
+        console.log('  http://' + a + ':' + port);
+      });
+      console.log('授权页：http://127.0.0.1:' + port + '/pair（或 http://<局域网IP>:' + port + '/pair）');
+    }
     return list;
   }).catch(function (error) { return stop().then(function () { throw error; }); });
 }

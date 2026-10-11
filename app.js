@@ -30,7 +30,31 @@
         return a;
       }).catch(function () { return null; });
     }
-    return Promise.resolve(tokenMeta ? { token: tokenMeta.content, port: Number(location.port) || 8123 } : null);
+    // 纯网站端（无客户端桥）：通过「显式配对」获取本机代理 token
+    return webPairAuth();
+  }
+  var webPairError = '';
+  function webPairAuth() {
+    if (IS_ANDROID) return Promise.resolve(null);   // Android 用进程内 BiliProxy，不走网站配对
+    if (tokenMeta) return Promise.resolve({ token: tokenMeta.content, port: Number(location.port) || 8123 });
+    var base = customProxyBase() ? customProxyBase().replace(/\/+$/, '') : 'http://127.0.0.1:8123';
+    var port = Number((base.match(/:(\d+)$/) || [])[1]) || 8123;
+    var cached = null;
+    try { cached = JSON.parse(localStorage.getItem('bili_web_auth') || 'null'); } catch (e) { }
+    if (cached && cached.base === base && cached.token) return Promise.resolve({ token: cached.token, port: port });
+    return nativeFetch(base + '/web-token', { credentials: 'omit' })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, j: j }; }); })
+      .then(function (res) {
+        if (res.status === 200 && res.j && res.j.token) {
+          try { localStorage.setItem('bili_web_auth', JSON.stringify({ base: base, token: res.j.token })); } catch (e) { }
+          return { token: res.j.token, port: res.j.port || port };
+        }
+        // token 失效 / 未授权：清除本地缓存，避免旧 token 持续复用
+        if (cached) { try { localStorage.removeItem('bili_web_auth'); } catch (e) { } }
+        webPairError = res.j && res.j.error ? res.j.error : '网站端未连接到本地代理';
+        return null;
+      })
+      .catch(function () { webPairError = '本地代理未启动'; return null; });
   }
   getProxyAuth();
   function fetch(url, options) {
@@ -257,6 +281,14 @@
         if (lis[li].textContent.indexOf('网络被限速') >= 0) lis[li].hidden = true;
       }
     }
+  } else if (!tokenMeta) {
+    // 网站端（纯静态托管）：显示「自定义代理地址」输入框，支持填写电脑局域网地址（如 http://192.168.1.5:8123）
+    if (customProxyBlock) customProxyBlock.hidden = false;
+    // 隐藏桌面专属的「代理方式」下拉与端口输入（网站端以自定义地址为准）
+    var wm = document.getElementById('proxy-mode');
+    var wp = document.getElementById('proxy-port');
+    if (wm) { var wr = wm.closest('.set-block'); if (wr) wr.hidden = true; }
+    if (wp) { var wpr = wp.closest('.set-block'); if (wpr) wpr.hidden = true; }
   }
 
   function fmtCount(n) {
@@ -311,6 +343,8 @@
   var useProxy = true;
 
   function proxyMode() {
+    // 纯网站端（无客户端桥）：以「自定义代理地址」输入框为准；为空则视为本机代理
+    if (!window.biliAPI && !tokenMeta) return customProxyBase() ? 'custom' : 'local';
     return proxyModeSelect ? proxyModeSelect.value : 'auto';
   }
   function customProxyBase() {
@@ -355,7 +389,11 @@
         tip = '代理已连接，可正常提取链接';
       } else {
         proxyTip.className = 'proxy-tip bad';
-        tip = '代理未连接：请点击下方「一键修复」，或（网页版）运行 start-server.bat 后重试';
+        if (!window.biliAPI && !tokenMeta) {
+          tip = '网站端未连接：① 电脑与本机连接同一 WiFi；② 电脑上运行 start-server.bat --lan（Windows）或 node server.js --lan（Mac / Linux）；③ 在下方设置-代理-自定义地址填写 http://<电脑局域网IP>:8123 后刷新本页。若在本机使用可省略 --lan 与自定义地址';
+        } else {
+          tip = '代理未连接：请点击下方「一键修复」，或（网页版）运行 start-server.bat 后重试';
+        }
       }
       proxyTip.textContent = tip;
       proxyTip.hidden = false;
@@ -1618,9 +1656,11 @@
       var start = i * part;
       var end = Math.min(total - 1, (i + 1) * part - 1);
       if (start > end) { chunks[i] = new Uint8Array(0); return Promise.resolve(); }
-      // 分片轮换主/备用 CDN 地址（再叠加代理 host 轮换），绕开单节点限速
+      // 首次固定用 probe 已验证的同一 CDN 节点（urls[0]），仅轮换代理 host（127.0.0.1/.2/.3）绕开浏览器单地址 6 连接限制，
+      // 避免不同 backup 节点文件大小/范围不一致；失败重试时才切换到其他 CDN 节点容错。
       received[i] = 0;
-      var t = rotateHost(urls[(i + (retried ? 1 : 0)) % urls.length], i);
+      var cdnUrl = urls[retried ? ((i + 1) % urls.length) : 0];
+      var t = rotateHost(cdnUrl, i);
       return fetch(t, { headers: { Range: 'bytes=' + start + '-' + end }, credentials: 'omit', signal: signal })
         .then(function (res) {
           if (res.status !== 206 || res.headers.get('Content-Range') !== 'bytes ' + start + '-' + end + '/' + total) throw new Error('分段 ' + (i + 1) + ' 返回范围不匹配');
@@ -1703,14 +1743,21 @@
     };
 
     var targets = Array.isArray(url) && url.length ? url : [url];
-    var go = function (targets) {
-      var t0 = targets[0];
-      return fetch(proxyUrl('stream', t0), { headers: { Range: 'bytes=0-0' }, credentials: 'omit', signal: signal }).then(function (probe) {
+    // 把 CDN 直链统一映射为「实际请求地址」：走内置代理时包一层 /stream?url=（分片才能跨域 + 带防盗链），
+    // 直连模式才使用原始 CDN 地址。已包装过（自定义代理）的地址不重复包装。
+    function toReqUrl(cdnUrl) {
+      if (/\/stream\?url=/.test(cdnUrl)) return cdnUrl;
+      if (useProxy && proxyMode() !== 'custom') return proxyUrl('stream', cdnUrl);
+      return cdnUrl;
+    }
+    var go = function (reqTargets) {
+      var t0 = reqTargets[0];
+      return fetch(t0, { headers: { Range: 'bytes=0-0' }, credentials: 'omit', signal: signal }).then(function (probe) {
         if (check()) throw new Error('已取消');
         var total = parseContentRange(probe.headers.get('content-range'));
         if (probe.status === 206 && total > 0) {
           var ctype = probe.headers.get('content-type') || 'application/octet-stream';
-          return segmentedDownload(targets, total, ctype, onProgress, threadCount, check, signal);
+          return segmentedDownload(reqTargets, total, ctype, onProgress, threadCount, check, signal);
         }
         return singleDownload(t0, onProgress, check, signal);
       }).catch(function (err) {
@@ -1722,9 +1769,9 @@
 
     var p;
     if (useProxy && proxyMode() !== 'custom') {
-      if (proxyAlive === true) p = go(targets);
+      if (proxyAlive === true) p = go(targets.map(toReqUrl));
       else p = checkProxy().then(function (alive) {
-        if (alive) return go(targets);
+        if (alive) return go(targets.map(toReqUrl));
         var c = customProxyBase();
         if (proxyMode() === 'auto' && c) return go(targets.map(function (t) { return c + '/stream?url=' + encodeURIComponent(t); }));
         return go(targets);
@@ -1783,8 +1830,8 @@
       }
     };
     task.cancelFn = function () {
-      // 原生下载无法立即中断网络，标记取消：完成后不落盘展示
       task.cancelled = true;
+      if (window.biliAPI && window.biliAPI.cancelDownload) window.biliAPI.cancelDownload(cbId);
     };
     window.biliAPI.download(url, filename, cbId);
   }
@@ -1820,7 +1867,10 @@
         }
       }
     };
-    task.cancelFn = function () { task.cancelled = true; };
+    task.cancelFn = function () {
+      task.cancelled = true;
+      if (window.biliAPI && window.biliAPI.cancelDownload) window.biliAPI.cancelDownload(cbId);
+    };
     setTaskStatus(task, 'running', '高清下载中（原生双轨 + 合并）…');
     window.biliAPI.muxDASH(entry.videoUrl || (entry.videoUrls && entry.videoUrls[0]), entry.audioUrl || (entry.audioUrls && entry.audioUrls[0]), filename, cbId);
   }
@@ -4507,7 +4557,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.6.14';
+  var APP_VERSION = '1.7.3';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

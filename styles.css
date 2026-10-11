@@ -1206,4 +1206,20 @@ body.overlay-active .tasks-card {
 
   /* 悬浮球 */
   .float-dot { width: 46px; height: 46px; font-size: 18px; }
+
+  /* 安全区适配（刘海屏 / 手势条） */
+  body { padding-bottom: env(safe-area-inset-bottom, 0); }
+  .bottom-nav, .side-nav { padding-bottom: env(safe-area-inset-bottom, 0); }
+  .settings-panel { padding-bottom: calc(env(safe-area-inset-bottom, 0) + 16px); }
+
+  /* 防止横向溢出与滚动卡顿 */
+  html, body { overflow-x: hidden; }
+  * { -webkit-tap-highlight-color: transparent; }
+  .container, .video-card, .task-card, .his-row, .dl-row, .queue-row {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 输入框聚焦时不放大（iOS/Android 字体>=16px 不缩放） */
+  input[type="text"], input[type="url"], input[type="number"], input[type="password"],
+  input[type="time"], select, textarea { font-size: 16px; }
 }
