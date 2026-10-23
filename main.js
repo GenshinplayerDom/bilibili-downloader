@@ -264,6 +264,37 @@ function ffmpegPath() {
 async function downloadToFile(url, dest, onProgress) {
   await downloader.download([url], dest, { threads: 1, onProgress });
 }
+/** 磁盘可用空间（字节）；失败返回 Infinity（不阻断） */
+function diskFreeBytes(dir) {
+  try {
+    const st = fs.statfsSync(dir);
+    return Number(st.bavail) * Number(st.bsize);
+  } catch (e) { return Infinity; }
+}
+function fmtBytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + 'GB' : (n / 1048576).toFixed(0) + 'MB'; }
+/** 估算媒体流总字节（仅用于磁盘预检，探测失败不阻塞） */
+async function estimateMediaBytes(payload) {
+  const urls = [];
+  (payload.videoUrls || (payload.videoUrl ? [payload.videoUrl] : [])).forEach(u => urls.push(u));
+  (payload.audioUrls || (payload.audioUrl ? [payload.audioUrl] : [])).forEach(u => urls.push(u));
+  let total = 0;
+  for (const u of urls) {
+    try { const info = await downloader.probe(u, new AbortController().signal); total += info.total || 0; }
+    catch (e) { /* 探测失败不阻断下载 */ }
+  }
+  return total;
+}
+/** 下载前磁盘空间预检：分片临时目录 + 合流输出 + faststart 重写，保守按 2.5 倍媒体大小预留，
+ *  避免大文件下载到中途/合并阶段才因磁盘写满失败（浪费已下载分片）。 */
+async function precheckDiskSpace(dir, payload) {
+  const free = diskFreeBytes(dir);
+  if (!Number.isFinite(free)) return;              // 无法探测则不阻断
+  let est = 0;
+  try { est = await estimateMediaBytes(payload); } catch (e) { }
+  if (est > 0 && est * 2.5 > free) {
+    throw new Error('磁盘空间不足：预计需约 ' + fmtBytes(est * 2.5) + '，当前剩余 ' + fmtBytes(free) + '。请清理空间或更换下载目录后重试。');
+  }
+}
 /** 直接下载（弹幕/字幕等非媒体文件）：带 UA/Referer、禁用压缩，不经分片下载器，
  *  规避 Range/probe/压缩限制导致的失败 */
 function directDownload(url, dest) {
@@ -335,6 +366,7 @@ async function muxDownload(payload) {
   const dir = getDownloadDir();
   let tmpDir, outPath, complete = false;
   try {
+    await precheckDiskSpace(dir, payload);
     outPath = security.reserveOutput(dir, payload.filename);
     tmpDir = fs.mkdtempSync(path.join(dir, '.bili-mux-'));
     const video = path.join(tmpDir, 'video.m4s');
