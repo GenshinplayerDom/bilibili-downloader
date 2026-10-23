@@ -13,8 +13,11 @@ const security = require('./lib/security');
 const { CookieStore } = require('./lib/cookie-store');
 const { Downloader, DownloadControl } = require('./lib/downloader');
 const { pathToFileURL } = require('url');
-const downloader = new Downloader({ cookie: () => proxy.buildCookie(), connections: 32 });
-// connections=32：DASH 高清下载时视频流 + 音频流同时并发，避免两流平分 16 连接导致实际并发减半
+const downloader = new Downloader({ cookie: () => proxy.buildCookie(), connections: 64 });
+// connections=64：批量下载时最多 maxConcurrent(默认8) 个任务并发，每个任务视频流+音频流 2 条流同时下载，
+// 最坏 16 条流争抢连接。连接池过小（原32）会让每流只分到约 2 个连接、并行度骤降、批量下载明显变慢；
+// 提至 64 后每流平均可达 4 连接（吞吐翻倍）。单任务时每条流的实际连接受 threads(≤16) 限制不会超量，
+// 因此提高连接池不会导致单任务过度并发。分片下载写盘为逐分片独立流，最后顺序组装，见 lib/downloader.js。
 const controls = new Map();
 let cookieStore, proxyStart;
 let managed = [];
@@ -361,23 +364,42 @@ async function muxDownload(payload) {
     sendProgress('bili:mux-progress', { token, frac: .9, speed: 0, stage: '正在合并音视频', phase: 'merging' });
     const start = Number(payload.start) || 0, end = Number(payload.end) || 0;
     if (start < 0 || end < 0 || (end && end <= start)) throw new Error('无效的片段时间');
-    // 片段裁剪：-ss 置于输入前（input seek，视频从最近关键帧开始输出，避免 -c copy 下开头卡首帧）；
-    // 音频从更早位置开始（前移 3s），保证音频覆盖视频起点，避免片段开头无声；-t 相应加长覆盖到 end
-    let args = ['-y'];
-    if (start > 0) {
-      args.push('-ss', String(Math.max(0, start - 3)));
-      if (end) args.push('-t', String(end - start + 4));
-    } else if (end) {
-      args.push('-t', String(end));
+    const isMp4 = path.extname(outPath).toLowerCase() === '.mp4';
+    const ext = path.extname(outPath);
+    const staged = path.join(tmpDir, 'output' + ext);
+    const onMerge = fraction => sendProgress('bili:mux-progress', { token, frac: .9 + fraction * .1, stage: '正在合并音视频', phase: 'merging' }, control);
+    if (!start && !end) {
+      // 无片段：视频流 + 音频流一步无损合并
+      let args = ['-y', '-i', video];
+      if (audioUrls.length) args.push('-i', audio);
+      args.push('-c', 'copy');
+      if (isMp4) args.push('-movflags', '+faststart');
+      args.push(staged);
+      await runFfmpeg(args, onMerge, control);
+    } else {
+      // 片段裁剪：先无损合并视频流与音频流为单个文件，让音视频在同一文件内拥有统一时间戳，
+      // 再对该单文件做 input seek 裁剪。若直接对视频流 / 音频流两个独立输入分别 seek，
+      // -c copy 流复制下视频按关键帧、音频按精确点定位，二者起始时间戳会错位（前几秒黑屏或无声）、
+      // 且音频不 seek 时输出会错误地保留整片时长。合并后单输入 seek 可保证音画同步且时长正确。
+      const merged = path.join(tmpDir, 'merged' + ext);
+      let mergeArgs = ['-y', '-i', video];
+      if (audioUrls.length) mergeArgs.push('-i', audio);
+      mergeArgs.push('-c', 'copy');
+      if (isMp4) mergeArgs.push('-movflags', '+faststart');
+      mergeArgs.push(merged);
+      await runFfmpeg(mergeArgs, onMerge, control);
+      await control.ready();
+      // input seek：视频从最近关键帧开始输出，避免 -c copy 下开头卡首帧；
+      // make_zero 将起始时间戳归零，保证音视频起点对齐、开头即有音频。
+      let clipArgs = ['-y'];
+      if (start > 0) clipArgs.push('-ss', String(start));
+      clipArgs.push('-i', merged);
+      if (end) clipArgs.push('-t', String(start > 0 ? (end - start) : end));
+      clipArgs.push('-c', 'copy', '-avoid_negative_ts', 'make_zero');
+      if (isMp4) clipArgs.push('-movflags', '+faststart');
+      clipArgs.push(staged);
+      await runFfmpeg(clipArgs, onMerge, control);
     }
-    args.push('-i', video);
-    if (audioUrls.length) args.push('-i', audio);
-    args.push('-c', 'copy');
-    args.push('-c', 'copy');
-    if (path.extname(outPath).toLowerCase() === '.mp4') args.push('-movflags', '+faststart');
-    const staged = path.join(tmpDir, 'output' + path.extname(outPath));
-    args.push(staged);
-    await runFfmpeg(args, fraction => sendProgress('bili:mux-progress', { token, frac: .9 + fraction * .1, stage: '正在合并音视频', phase: 'merging' }), control);
     await control.ready();
     fs.renameSync(staged, outPath); rememberFile(outPath); complete = true;
     return { ok: true, path: outPath, filename: path.basename(outPath), size: fs.statSync(outPath).size };

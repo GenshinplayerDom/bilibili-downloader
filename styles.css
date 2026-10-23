@@ -1092,13 +1092,13 @@ body.no-select { user-select: none; }
   min-width: 30px; height: 28px;
   border: 1px solid var(--line, #e3e6ee);
   border-radius: 6px;
-  background: #fff; color: var(--text, #333);
+  background: var(--card, #fff); color: var(--text, #333);
   font-size: 12.5px; cursor: pointer;
 }
 .pager-page-btn:hover { border-color: var(--brand, #fb7299); color: var(--brand, #fb7299); }
 .pager-page-btn.active { background: var(--brand, #fb7299); border-color: var(--brand, #fb7299); color: #fff; }
 .pager-jump { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted, #888); }
-.pager-jump input { width: 52px; height: 26px; border: 1px solid var(--line, #e3e6ee); border-radius: 6px; padding: 0 6px; font-size: 12.5px; }
+.pager-jump input { width: 52px; height: 26px; border: 1px solid var(--line, #e3e6ee); border-radius: 6px; padding: 0 6px; font-size: 12.5px; background: var(--card, #fff); color: var(--text, #333); }
 .list-empty { padding: 30px; text-align: center; color: var(--muted, #888); }
 .list-detail-back { margin-left: 10px; }
 

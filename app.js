@@ -136,6 +136,7 @@
   var listTitle = $('list-title');
   var listSub = $('list-sub');
   var listTbody = $('list-tbody');
+  var listTableWrap = document.querySelector('.list-table-wrap');
   var listBack = $('list-back');
   var listCheckAll = $('list-check-all');
   var listUncheckAll = $('list-uncheck-all');
@@ -289,6 +290,34 @@
     var wp = document.getElementById('proxy-port');
     if (wm) { var wr = wm.closest('.set-block'); if (wr) wr.hidden = true; }
     if (wp) { var wpr = wp.closest('.set-block'); if (wpr) wpr.hidden = true; }
+    // 纯浏览器无原生桥：隐藏仅客户端生效的「下载限速」（网页端无法对 fetch 分片做系统级限速）
+    var wRl = document.getElementById('rate-limit');
+    if (wRl) { var wRr = wRl.closest('.set-row'); if (wRr) wRr.hidden = true; }
+    // 网页版前端分片下载只支持取消、不支持暂停 / 续传：隐藏各处「暂停全部 / 继续全部」按钮
+    ['tasks-pause-all', 'tasks-continue-all', 'queue-pause-all', 'queue-continue-all'].forEach(function (id) {
+      var e = document.getElementById(id);
+      if (e) e.hidden = true;
+    });
+    // 隐藏「本地下载目录」（浏览器下载目录由浏览器管理，网页内无法更改 / 打开）与「网络重置」（需原生网络栈权限）整段
+    var wSecs = document.querySelectorAll('.settings-panel .set-section');
+    for (var wi = 0; wi < wSecs.length; wi++) {
+      var wH = wSecs[wi].querySelector('h3');
+      if (wH && (wH.textContent.indexOf('网络重置') >= 0 || wH.textContent.indexOf('本地下载目录') >= 0)) wSecs[wi].hidden = true;
+    }
+    // 使用教程中与「网络重置 / 本地下载目录」相关的条目在网页端不适用，隐藏
+    var wTut = document.querySelector('.tutorial');
+    if (wTut) {
+      var wLis = wTut.querySelectorAll('li');
+      for (var wli = 0; wli < wLis.length; wli++) {
+        var wtx = wLis[wli].textContent || '';
+        if (wtx.indexOf('网络被限速') >= 0 || wtx.indexOf('网络重置') >= 0 || wtx.indexOf('本地下载目录') >= 0) wLis[wli].hidden = true;
+      }
+    }
+    // 首次使用说明弹窗中「可在设置→本地下载目录更改」一条在网页端不适用，隐藏
+    var wGuides = document.querySelectorAll('.guide-item');
+    for (var wg = 0; wg < wGuides.length; wg++) {
+      if ((wGuides[wg].textContent || '').indexOf('本地下载目录') >= 0) wGuides[wg].hidden = true;
+    }
   }
 
   function fmtCount(n) {
@@ -808,31 +837,57 @@
       });
     }
     // seasons_archives_list：返回合集视频列表（archives 不含 cid，下载时按 bvid 动态补全）
-    var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=' + mid + '&season_id=' + sid + '&page_num=1&page_size=50');
-    return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j && j.code && j.code !== 0) throw new Error('读取合集失败：' + (j.message || j.code));
-      var d = (j && j.data) || {};
-      var meta = d.meta || {};
-      var archives = (d.archives || []).filter(function (a) { return a && a.bvid; });
-      if (!archives.length) throw new Error('该合集暂无视频');
-      var medias = archives.map(function (a) {
+    // 循环分页拉取全部（page_size=50 为该接口较大单页；超过 50 集的合集必须翻页，否则漏视频）
+    var LIST_MAX = 200, PAGE_SIZE = 50;
+    var all = [], meta = {}, totalCount = 0;
+    function fetchCollectionPage(pageNum) {
+      var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=' + mid + '&season_id=' + sid + '&page_num=' + pageNum + '&page_size=' + PAGE_SIZE);
+      return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.code && j.code !== 0) throw new Error('读取合集失败：' + (j.message || j.code));
+        var d = (j && j.data) || {};
+        if (d.meta) meta = d.meta;
+        if (d.page && d.page.total) totalCount = d.page.total;
+        var archives = (d.archives || []).filter(function (a) { return a && a.bvid; });
+        all = all.concat(archives);
+        if (archives.length > 0 && (all.length < totalCount || (archives.length >= PAGE_SIZE)) && all.length < LIST_MAX && pageNum < Math.ceil(LIST_MAX / PAGE_SIZE) + 1) {
+          return fetchCollectionPage(pageNum + 1);
+        }
+      });
+    }
+    return fetchCollectionPage(1).then(function () {
+      if (!all.length) throw new Error('该合集暂无视频');
+      var medias = all.slice(0, LIST_MAX).map(function (a) {
         return {
           bvid: a.bvid, aid: a.aid, cid: a.cid || 0, title: a.title, duration: a.duration || 0, pic: fixCover(a.pic),
           stat: a.stat || { view: a.play || 0, danmaku: a.danmaku || 0 }
         };
       });
-      return { title: meta.title || ('合集 ' + sid), medias: medias, author: meta.upper ? meta.upper.name : '', total: d.page ? d.page.total : medias.length };
+      return { title: meta.title || ('合集 ' + sid), medias: medias, author: meta.upper ? meta.upper.name : '', total: totalCount || medias.length };
     });
   }
   function renderCollection(data) {
     openListPanel(data.title || ('合集 ' + (listState && listState.sid || '')), '合集', data.medias);
   }
   function loadFavlistData(fid) {
-    var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/resource/list?media_id=' + fid + '&pn=1&ps=20');
-    return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j && j.code && j.code !== 0) throw new Error('读取收藏夹失败：' + (j.message || j.code));
-      var d = (j && j.data) || {};
-      var medias = (d.medias || []).map(function (m) {
+    // 循环分页拉取收藏夹全部视频（ps=20 为接口上限，has_more 标记是否还有下一页）
+    var LIST_MAX = 200, PAGE_SIZE = 20;
+    var all = [], info = null;
+    function fetchFavPage(pn) {
+      var u = proxyBase() + '/api?url=' + encodeURIComponent('https://api.bilibili.com/x/v3/fav/resource/list?media_id=' + fid + '&pn=' + pn + '&ps=' + PAGE_SIZE);
+      return fetch(u, { credentials: 'omit' }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && j.code && j.code !== 0) throw new Error('读取收藏夹失败：' + (j.message || j.code));
+        var d = (j && j.data) || {};
+        if (d.info) info = d.info;
+        var medias = d.medias || [];
+        all = all.concat(medias);
+        if (d.has_more && medias.length > 0 && all.length < LIST_MAX && pn < Math.ceil(LIST_MAX / PAGE_SIZE) + 1) {
+          return fetchFavPage(pn + 1);
+        }
+      });
+    }
+    return fetchFavPage(1).then(function () {
+      if (!all.length) throw new Error('该收藏夹暂无视频');
+      var medias = all.slice(0, LIST_MAX).map(function (m) {
         // fav/resource/list 返回 cover（非 pic）与 cnt_info（非 stat）
         var ci = m.cnt_info || {};
         return {
@@ -842,8 +897,7 @@
           stat: { view: ci.play || 0, danmaku: ci.danmaku || 0, like: ci.thumb_up || 0, reply: 0 }
         };
       });
-      if (!medias.length) throw new Error('该收藏夹暂无视频');
-      return { title: d.info ? d.info.title : ('收藏夹 ' + fid), medias: medias };
+      return { title: info ? info.title : ('收藏夹 ' + fid), medias: medias };
     });
   }
   function renderFavlist(data) {
@@ -860,7 +914,14 @@
         stat: m.stat || {}, page: i + 1
       };
     });
-    listState = { title: title, kind: kind, items: items, checked: {}, backTo: null, searchKw: searchKw || '' };
+    // 合集/收藏夹：一次加载全部后做客户端分页（每页数量取设置项，默认 30）；搜索结果为服务端分页（searchKw 非空）
+    var paged = (kind === '合集' || kind === '收藏夹') && items.length > 0;
+    var ps = paged ? searchPageSize() : items.length;
+    listState = {
+      title: title, kind: kind, items: items, checked: {}, backTo: null, searchKw: searchKw || '',
+      paged: paged, page: 1, pageSize: paged ? ps : items.length,
+      totalPages: paged ? Math.max(1, Math.ceil(items.length / ps)) : 1
+    };
     // 同步当前全局下载偏好到列表面板（清晰度/线程/编码/封装/音频格式）
     if (listQn) {
       listQn.innerHTML = qnSelect.innerHTML;
@@ -875,6 +936,7 @@
     if (listTitle) listTitle.textContent = title + '（' + kind + '）';
     if (listSub) listSub.textContent = '共 ' + items.length + ' 个视频 · 勾选后点击「一键下载勾选」加入下载队列；单击「标题」进入单个视频下载详情，点标题左侧区域可勾选。';
     renderListTable();
+    if (paged) renderListClientPager(); else if (listPager) listPager.hidden = true;
     listPanel.hidden = false;
     mainContainer.hidden = true;
     document.body.classList.add('overlay-active');
@@ -885,10 +947,59 @@
     if (settingsMask) settingsMask.hidden = true;
     updateListDlBtn();
   }
+  // 合集/收藏夹客户端分页：只渲染当前页切片（勾选状态按 bvid 存于 listState.checked，翻页不丢失）
+  function listPageItems() {
+    if (!listState) return [];
+    if (!listState.paged) return listState.items;
+    var start = (listState.page - 1) * listState.pageSize;
+    return listState.items.slice(start, start + listState.pageSize);
+  }
+  function gotoListPage(n) {
+    if (!listState || !listState.paged) return;
+    n = Math.max(1, Math.min(listState.totalPages, Number(n) || 1));
+    listState.page = n;
+    renderListTable();
+    renderListClientPager();
+    if (listTableWrap) listTableWrap.scrollTop = 0;
+  }
+  function renderListClientPager() {
+    if (!listPager || !listState || !listState.paged) { if (listPager) listPager.hidden = true; return; }
+    var pg = listState.page, pages = listState.totalPages;
+    if (pages <= 1) { listPager.hidden = true; return; }
+    listPager.hidden = false;
+    listPager.dataset.mode = 'client';
+    var box = document.getElementById('pager-pages');
+    box.innerHTML = '';
+    function addBtn(n, label, active) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pager-page-btn' + (active ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', function () { gotoListPage(n); });
+      box.appendChild(b);
+    }
+    for (var i = 1; i <= pages; i++) {
+      if (pages > 11 && i > 2 && i < pages - 1 && Math.abs(i - pg) > 3) {
+        if (box.lastChild && box.lastChild.textContent !== '…') {
+          var e = document.createElement('span');
+          e.textContent = '…';
+          box.appendChild(e);
+        }
+        continue;
+      }
+      addBtn(i, String(i), i === pg);
+    }
+    var prev = document.getElementById('pager-prev');
+    var next = document.getElementById('pager-next');
+    if (prev) prev.disabled = pg <= 1;
+    if (next) next.disabled = pg >= pages;
+    var pi = document.getElementById('pager-input');
+    if (pi) pi.value = String(pg);
+  }
   function renderListTable() {
     if (!listTbody || !listState) return;
     listTbody.innerHTML = '';
-    listState.items.forEach(function (it, i) {
+    listPageItems().forEach(function (it, i) {
       var tr = document.createElement('tr');
       if (listState.checked[it.bvid]) tr.className = 'row-checked';
       var tdCk = document.createElement('td');
@@ -1006,6 +1117,7 @@
     if (timerInput) timerInput.value = '';
     if (timerCheck) timerCheck.checked = false;
     listPanel.hidden = true;
+    if (listPager) listPager.hidden = true;
     mainContainer.hidden = false;
     resultEl.hidden = false;
     renderCurrent();
@@ -1173,6 +1285,11 @@
     e.stopPropagation();
     playOnlineVideo();
   });
+  var playOnlineBtn = $('play-online-btn');
+  if (playOnlineBtn) playOnlineBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    playOnlineVideo();
+  });
 
   function ensureDetailBackBtn() {
     if (!listBack) return;
@@ -1185,6 +1302,8 @@
       b.addEventListener('click', function () {
         if (listState) {
           listPanel.hidden = false;
+          if (listState.paged) renderListClientPager();
+          else if (listPager) listPager.hidden = true;
           mainContainer.hidden = true;
           if (resultEl) resultEl.hidden = true;
           renderListTable();
@@ -1193,14 +1312,6 @@
       });
       var wrap = $('opt-actions');
       if (wrap) wrap.appendChild(b);
-      // 「返回列表」旁新增「在线播放」
-      var p = document.createElement('button');
-      p.type = 'button';
-      p.id = 'play-online-btn';
-      p.className = 'mini-btn list-detail-back';
-      p.textContent = '▶ 在线播放';
-      p.addEventListener('click', playOnlineVideo);
-      wrap.appendChild(p);
     }
   }
   // 勾选一键下载：每个勾选视频以「单个视频下载」方式加入下载队列（并发由调度器控制）
@@ -1364,6 +1475,7 @@
     if (!listPager) return;
     if (!searchState.kw || pages <= 1) { listPager.hidden = true; return; }
     listPager.hidden = false;
+    listPager.dataset.mode = 'server';
     var box = document.getElementById('pager-pages');
     box.innerHTML = '';
     function addBtn(n, label, active) {
@@ -1401,17 +1513,26 @@
     var next = document.getElementById('pager-next');
     var go = document.getElementById('pager-go');
     var pi = document.getElementById('pager-input');
-    if (prev) prev.addEventListener('click', function () { if (searchState.kw && searchState.page > 1) doSearch(searchState.kw, searchState.page - 1); });
-    if (next) next.addEventListener('click', function () { if (searchState.kw) doSearch(searchState.kw, searchState.page + 1); });
+    if (prev) prev.addEventListener('click', function () {
+      if (listState && listState.paged) { gotoListPage(listState.page - 1); return; }
+      if (searchState.kw && searchState.page > 1) doSearch(searchState.kw, searchState.page - 1);
+    });
+    if (next) next.addEventListener('click', function () {
+      if (listState && listState.paged) { gotoListPage(listState.page + 1); return; }
+      if (searchState.kw) doSearch(searchState.kw, searchState.page + 1);
+    });
     if (go && pi) go.addEventListener('click', function () {
       var n = Number(pi.value);
       if (!n || n < 1) { showToast('请输入有效页码', 'warn'); return; }
+      if (listState && listState.paged) { gotoListPage(n); return; }
       doSearch(searchState.kw, n);
     });
     if (pi) pi.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
         var n = Number(pi.value);
-        if (n && n >= 1) doSearch(searchState.kw, n);
+        if (!n || n < 1) return;
+        if (listState && listState.paged) { gotoListPage(n); return; }
+        doSearch(searchState.kw, n);
       }
     });
   }
@@ -1653,15 +1774,16 @@
       onProgress(Math.min(sum / total, 1));
     }
 
-    function fetchPart(i, retried) {
+    function fetchPart(i, attempt) {
+      attempt = attempt || 0;
       if (check && check()) return Promise.reject(new Error('已取消'));
       var start = i * part;
       var end = Math.min(total - 1, (i + 1) * part - 1);
       if (start > end) { chunks[i] = new Uint8Array(0); return Promise.resolve(); }
-      // 首次固定用 probe 已验证的同一 CDN 节点（urls[0]），仅轮换代理 host（127.0.0.1/.2/.3）绕开浏览器单地址 6 连接限制，
-      // 避免不同 backup 节点文件大小/范围不一致；失败重试时才切换到其他 CDN 节点容错。
+      // attempt=0 固定用 probe 已验证的首选节点（仅轮换代理 host 127.0.0.1/.2/.3 绕开浏览器单地址 6 连接限制）；
+      // 某分片失败时按 attempt 依次切换其余 backup CDN 节点，直到全部节点都试过。
       received[i] = 0;
-      var cdnUrl = urls[retried ? ((i + 1) % urls.length) : 0];
+      var cdnUrl = urls[attempt % urls.length];
       var t = rotateHost(cdnUrl, i);
       return fetch(t, { headers: { Range: 'bytes=' + start + '-' + end }, credentials: 'omit', signal: signal })
         .then(function (res) {
@@ -1712,13 +1834,13 @@
         })
         .then(function (data) { if (data.length !== end - start + 1) throw new Error('分片数据不完整'); chunks[i] = data; })
         .catch(function (err) {
-          if (!retried && !(check && check())) return fetchPart(i, true);
+          if (attempt + 1 < urls.length && !(check && check())) return fetchPart(i, attempt + 1);
           throw err;
         });
     }
 
     var tasks = [];
-    for (var i = 0; i < n; i++) tasks.push(fetchPart(i, false));
+    for (var i = 0; i < n; i++) tasks.push(fetchPart(i, 0));
     return Promise.all(tasks).then(function () {
       if (check && check()) throw new Error('已取消');
       var totalLen = 0;
@@ -1753,19 +1875,40 @@
       return cdnUrl;
     }
     var go = function (reqTargets) {
-      var t0 = reqTargets[0];
-      return fetch(t0, { headers: { Range: 'bytes=0-0' }, credentials: 'omit', signal: signal }).then(function (probe) {
-        if (check()) throw new Error('已取消');
-        var total = parseContentRange(probe.headers.get('content-range'));
-        if (probe.status === 206 && total > 0) {
-          var ctype = probe.headers.get('content-type') || 'application/octet-stream';
-          return segmentedDownload(reqTargets, total, ctype, onProgress, threadCount, check, signal);
+      // 依次探测主/备 CDN 节点：某个节点返回 5xx / 403 / 不支持 Range 或网络异常时，
+      // 自动切换到下一个 backup 节点，避免单一坏节点导致整个任务必现失败（如 HTTP 502）。
+      function probeAt(idx) {
+        if (idx >= reqTargets.length) {
+          return Promise.reject(new Error('所有下载节点均不可用（主/备 CDN 均返回错误），请稍后重试或点击「一键修复」切换网络'));
         }
-        return singleDownload(t0, onProgress, check, signal);
+        var t = reqTargets[idx];
+        return fetch(t, { headers: { Range: 'bytes=0-0' }, credentials: 'omit', signal: signal }).then(function (probe) {
+          if (check()) throw new Error('已取消');
+          var total = parseContentRange(probe.headers.get('content-range'));
+          if (probe.status === 206 && total > 0) {
+            return { ok: true, index: idx, target: t, total: total, ctype: probe.headers.get('content-type') || 'application/octet-stream' };
+          }
+          // 节点返回 200（整包，不支持分段）→ 该节点直接整包下载
+          if (probe.status === 200) {
+            return { ok: true, index: idx, target: t, total: 0, whole: true };
+          }
+          // 403 / 5xx / 其它：换下一个 backup 节点
+          return probeAt(idx + 1);
+        }).catch(function (e) {
+          if (check()) throw e;
+          return probeAt(idx + 1);   // 网络错误 / DNS / 中断：换下一个节点
+        });
+      }
+      return probeAt(0).then(function (found) {
+        // 把探测成功的节点轮换到首位（分段首次固定它），其余节点作为重试备份
+        var ordered = reqTargets.slice(found.index).concat(reqTargets.slice(0, found.index));
+        if (found.whole) return singleDownload(found.target, onProgress, check, signal);
+        return segmentedDownload(ordered, found.total, found.ctype, onProgress, threadCount, check, signal);
       }).catch(function (err) {
         if (err && err.status) throw err;
         if (check()) throw err;
-        return singleDownload(t0, onProgress, check, signal).catch(function () { throw err; });
+        // 最后兜底：对首选节点做一次整包下载尝试
+        return singleDownload(reqTargets[0], onProgress, check, signal).catch(function () { throw err; });
       });
     };
 
@@ -1967,6 +2110,11 @@
 
   function fileActionsAvailable() {
     return !!(window.biliAPI && (window.biliAPI.openFile || window.biliAPI.deleteFile));
+  }
+
+  // 暂停 / 继续依赖原生下载桥（Electron / Android）；纯网页版前端分片下载只支持取消，不支持暂停
+  function pauseSupported() {
+    return !!(window.biliAPI && window.biliAPI.pauseDownload && window.biliAPI.resumeDownload);
   }
 
   function actOpenFile(pathOrName) {
@@ -2432,9 +2580,10 @@
   }
   /** 一键暂停全部：所有正在下载的任务置为已暂停（保留分片，可继续） */
   function pauseAllTasks() {
+    if (!pauseSupported()) { showToast('网页版暂不支持暂停（仅客户端支持）；可取消任务后重新下载', 'warn'); return; }
     var count = 0;
     tasks.slice().forEach(function (t) {
-      if (t.status === 'running' && t.pauseEl && !t.pauseEl.disabled) {
+      if (t.status === 'running' && t.pauseEl && !t.pauseEl.disabled && !t.pauseEl.hidden) {
         count++;
         t.pauseEl.click();
       }
@@ -2443,6 +2592,7 @@
   }
   /** 一键继续全部：所有已暂停 / 待继续任务恢复（含跨重启续传任务） */
   function continueAllTasks() {
+    if (!pauseSupported()) { showToast('网页版暂不支持继续（仅客户端支持暂停 / 续传）', 'warn'); return; }
     var count = 0;
     tasks.slice().forEach(function (t) {
       if (t.status !== 'paused') return;
@@ -2450,7 +2600,7 @@
         count++;
         removeTaskProcess(t);
         resumeStoredTask(t._resumeMeta);
-      } else if (t.pauseEl && !t.pauseEl.disabled) {
+      } else if (t.pauseEl && !t.pauseEl.disabled && !t.pauseEl.hidden) {
         count++;
         t.pauseEl.click();
       }
@@ -2509,6 +2659,7 @@
       resumeStoredTask(meta);
     });
     t.pauseEl.addEventListener('click', function () {
+      if (!(window.biliAPI && window.biliAPI.pauseDownload && window.biliAPI.resumeDownload)) { showToast('网页版暂不支持暂停 / 继续，可取消任务后重新下载', 'warn'); return; }
       var paused = t.status === 'paused';
       t.pauseEl.disabled = true;
       var operation = paused ? window.biliAPI.resumeDownload : window.biliAPI.pauseDownload;
@@ -2653,10 +2804,11 @@
         removeTaskProcess(t);
       });
       t._q.cancel = cancel;
-      // 暂停 / 继续（普通暂停任务）：与主任务区一致
+      // 暂停 / 继续（普通暂停任务）：与主任务区一致；网页版无原生下载桥时不显示
       var pauseBtn = row.querySelector('.task-pause');
-      pauseBtn.hidden = !(t.status === 'running' || t.status === 'paused');
+      pauseBtn.hidden = !((t.status === 'running' || t.status === 'paused') && window.biliAPI && window.biliAPI.pauseDownload && t.token);
       pauseBtn.addEventListener('click', function () {
+        if (!(window.biliAPI && window.biliAPI.pauseDownload && window.biliAPI.resumeDownload)) { showToast('网页版暂不支持暂停 / 继续，可取消任务后重新下载', 'warn'); return; }
         var paused = t.status === 'paused';
         pauseBtn.disabled = true;
         var operation = paused ? window.biliAPI.resumeDownload : window.biliAPI.pauseDownload;
@@ -4259,6 +4411,7 @@
   if (listBack) listBack.addEventListener('click', function () {
     // 从单视频详情返回列表，或从列表返回主菜单
     listPanel.hidden = true;
+    if (listPager) listPager.hidden = true;
     if (resultEl) resultEl.hidden = true;
     mainContainer.hidden = false;
     listState = null;
@@ -4292,6 +4445,7 @@
   /* ---------- v1.4：返回主菜单（保留本次下载历史） ---------- */
   function goHome() {
     if (listPanel) listPanel.hidden = true;
+    if (listPager) listPager.hidden = true;
     if (batchPanel) batchPanel.hidden = true;
     document.body.classList.remove('overlay-active');
     if (historyPanel) historyPanel.hidden = true;
@@ -4560,7 +4714,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.7.4';
+  var APP_VERSION = '1.7.6';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
