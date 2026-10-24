@@ -261,10 +261,7 @@ function ffmpegPath() {
   try { const binary = require('ffmpeg-static'); if (binary && fs.existsSync(binary)) return binary; } catch (_) {}
   return null;
 }
-async function downloadToFile(url, dest, onProgress) {
-  await downloader.download([url], dest, { threads: 1, onProgress });
-}
-/** 磁盘可用空间（字节）；失败返回 Infinity（不阻断） */
+async /** 磁盘可用空间（字节）；失败返回 Infinity（不阻断） */
 function diskFreeBytes(dir) {
   try {
     const st = fs.statfsSync(dir);
@@ -615,7 +612,9 @@ function registerIpc() {
       var coverPath = null;
       if (data.coverUrl) {
         coverPath = security.reserveOutput(dir, base + '.jpg');
-        await downloadToFile(data.coverUrl, coverPath, null);
+        // 封面为小图，用直连下载（GET + UA/Referer + 禁压缩）而非分片下载器：
+        // 避免 Range/probe 对图片 CDN 的兼容问题与额外往返开销
+        await directDownload(data.coverUrl, coverPath);
         if (!fs.existsSync(coverPath) || fs.statSync(coverPath).size < 100) { coverPath = null; }
       }
       return { ok: true, json: jsonPath, cover: coverPath };
