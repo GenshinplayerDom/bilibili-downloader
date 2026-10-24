@@ -261,7 +261,7 @@ function ffmpegPath() {
   try { const binary = require('ffmpeg-static'); if (binary && fs.existsSync(binary)) return binary; } catch (_) {}
   return null;
 }
-async /** 磁盘可用空间（字节）；失败返回 Infinity（不阻断） */
+/** 磁盘可用空间（字节）；失败返回 Infinity（不阻断） */
 function diskFreeBytes(dir) {
   try {
     const st = fs.statfsSync(dir);
@@ -754,7 +754,9 @@ app.whenReady().then(function () {
   // 即使 <video> 跟随 302 到直链也不会被防盗链 403
   try {
     session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      if (/bilivideo\.com|hdslb\.com|acgvideo\.com/i.test(details.url)) {
+      // 域名集合与 security.js 的 MEDIA_DOMAINS 对齐：所有可能的视频 CDN 直链均注入 Referer/UA，
+      // 避免在线播放落到 bilivideo.cn / .net / mountaintoys.cn / biliyungic.com 等节点时漏注入而防盗链 403
+      if (/bilivideo\.com|bilivideo\.cn|bilivideo\.net|hdslb\.com|acgvideo\.com|mountaintoys\.cn|biliyungic\.com/i.test(details.url)) {
         details.requestHeaders['Referer'] = 'https://www.bilibili.com/';
         details.requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
       }

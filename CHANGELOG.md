@@ -1,5 +1,9 @@
 # 1.7.6
 
+## 修复
+
+- 在线播放防盗链 Referer 注入的域名集合与 security.js 白名单对齐：补全 bilivideo.cn/.net、mountaintoys.cn、biliyungic.com 等节点，修复直链落到这些 CDN 时漏注入导致的 403；同时修正 diskFreeBytes 注释位置并去掉冗余 async。
+
 ## 健壮性
 
 - preload 进度/路径监听注册改为幂等：重复注册前先 removeAllListeners，避免重复初始化时监听器累积导致的重复回调与内存泄漏。
