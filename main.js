@@ -272,11 +272,8 @@ function diskFreeBytes(dir) {
   } catch (e) { return Infinity; }
 }
 function fmtBytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + 'GB' : (n / 1048576).toFixed(0) + 'MB'; }
-/** 估算媒体流总字节（仅用于磁盘预检，探测失败不阻塞） */
-async function estimateMediaBytes(payload) {
-  const urls = [];
-  (payload.videoUrls || (payload.videoUrl ? [payload.videoUrl] : [])).forEach(u => urls.push(u));
-  (payload.audioUrls || (payload.audioUrl ? [payload.audioUrl] : [])).forEach(u => urls.push(u));
+/** 估算一组媒体流的字节数（仅用于磁盘预检，探测失败不阻塞） */
+async function estimateUrlsBytes(urls) {
   let total = 0;
   for (const u of urls) {
     try { const info = await downloader.probe(u, new AbortController().signal); total += info.total || 0; }
@@ -284,16 +281,27 @@ async function estimateMediaBytes(payload) {
   }
   return total;
 }
+/** 从 payload 收集 DASH 媒体流 URL（video/audio，兼容单条/数组） */
+function payloadMediaUrls(payload) {
+  const urls = [];
+  (payload.videoUrls || (payload.videoUrl ? [payload.videoUrl] : [])).forEach(u => urls.push(u));
+  (payload.audioUrls || (payload.audioUrl ? [payload.audioUrl] : [])).forEach(u => urls.push(u));
+  return urls;
+}
 /** 下载前磁盘空间预检：分片临时目录 + 合流输出 + faststart 重写，保守按 2.5 倍媒体大小预留，
  *  避免大文件下载到中途/合并阶段才因磁盘写满失败（浪费已下载分片）。 */
-async function precheckDiskSpace(dir, payload) {
+async function precheckUrls(dir, urls) {
   const free = diskFreeBytes(dir);
   if (!Number.isFinite(free)) return;              // 无法探测则不阻断
   let est = 0;
-  try { est = await estimateMediaBytes(payload); } catch (e) { }
+  try { est = await estimateUrlsBytes(urls); } catch (e) { }
   if (est > 0 && est * 2.5 > free) {
     throw new Error('磁盘空间不足：预计需约 ' + fmtBytes(est * 2.5) + '，当前剩余 ' + fmtBytes(free) + '。请清理空间或更换下载目录后重试。');
   }
+}
+/** DASH 合流下载前的磁盘预检 */
+async function precheckDiskSpace(dir, payload) {
+  return precheckUrls(dir, payloadMediaUrls(payload));
 }
 /** 直接下载（弹幕/字幕等非媒体文件）：带 UA/Referer、禁用压缩，不经分片下载器，
  *  规避 Range/probe/压缩限制导致的失败 */
@@ -521,6 +529,7 @@ function registerIpc() {
     let dest, complete = false;
     try {
       dest = security.reserveOutput(getDownloadDir(), payload.filename);
+      await precheckUrls(getDownloadDir(), payload.urls || [payload.url]);   // 直链流式下载同样做磁盘预检
       await downloader.download(payload.urls || [payload.url], dest, {
         threads: payload.threads, control,
         keepPartsOnAbort: payload.persistParts === true,
