@@ -1,5 +1,9 @@
 # 1.7.6
 
+## 健壮性
+
+- preload 进度/路径监听注册改为幂等：重复注册前先 removeAllListeners，避免重复初始化时监听器累积导致的重复回调与内存泄漏。
+
 ## 优化
 
 - 封面图片导出改用直连下载（GET + UA/Referer + 禁压缩），避免分片下载器的 Range/probe 对图片 CDN 的兼容问题与额外往返开销；清理已无引用的 downloadToFile 死代码。

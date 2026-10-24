@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('biliAPI', {
     return ipcRenderer.invoke('bili:mux-cancel', token);
   },
   onMuxProgress: function (cb) {
+    // 幂等：重复注册前先移除旧监听，避免多次初始化累积监听器（重复回调/内存泄漏）
+    ipcRenderer.removeAllListeners('bili:mux-progress');
     ipcRenderer.on('bili:mux-progress', function (e, data) {
       if (cb) cb(data);
     });
@@ -102,6 +104,7 @@ contextBridge.exposeInMainWorld('biliAPI', {
     return ipcRenderer.invoke('bili:open-folder', { path: p });
   },
   onDlPath: function (cb) {
+    ipcRenderer.removeAllListeners('bili:dl-path');
     ipcRenderer.on('bili:dl-path', function (e, data) {
       if (cb) cb(data);
     });
@@ -114,6 +117,7 @@ contextBridge.exposeInMainWorld('biliAPI', {
     ipcRenderer.send('bili:stream-cancel', token);
   },
   onStreamProgress: function (cb) {
+    ipcRenderer.removeAllListeners('bili:stream-progress');
     ipcRenderer.on('bili:stream-progress', function (e, data) {
       if (cb) cb(data);
     });
