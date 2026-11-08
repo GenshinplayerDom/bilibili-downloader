@@ -30,7 +30,7 @@
 
 - `scripts/check.cjs` / `scripts/sync-android.cjs` 修正 Android 资产路径（`android/app/src/main/assets`），此前指向不存在的 `哔哩下载器-android-1.3.0/`，导致 `npm run check` 与 `npm run assets:android` 无法运行。
 - 更正 `download()` 返回值断言（`{ size, tempDir }` 对象）。
-- 新增回归测试：授权来源绑定与防嵌套、暂停保留分片、单分片快速路径；补充非 JSSRF、缺少 nonce、跨站 Origin 三类授权拒绝用例。
+- 新增回归测试：授权来源绑定与防嵌套、暂停保留分片、单分片快速路径；补充非 JSON 类型、缺少 nonce、跨站 Origin 三类授权拒绝用例。
 - 清理死代码：`floatTo16Slice`（MP3 转码已由 `encodeMp3` 内联实现）、`debounceParse`/`debounceTimer`（解析早已改为回车即时触发）、`closeLoginWin`（登录窗口 `closed` 事件已处理）。
 - 打包产物命名补 `${arch}`：`nsis` / `portable` 的 `artifactName` 此前不含架构，x64 与 ia32 同名互相覆盖。
 - 新增 `scripts/prepare-win-ffmpeg.cjs`：按目标架构准备 `ffmpeg.exe`，修复 Linux 交叉构建时 `extraResources` 取不到二进制、以及 32 位包被塞入 x64 ffmpeg 的问题。
