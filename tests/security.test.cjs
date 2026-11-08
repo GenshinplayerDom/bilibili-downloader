@@ -41,6 +41,7 @@ test('legacy cookies migrate to encryption; unavailable encryption never writes 
   assert.equal(fs.existsSync(legacy), false);
   assert.equal(fs.readFileSync(store.encryptedPath).includes(Buffer.from('FAKE_TEST_TOKEN')), false);
   assert.equal(store.load().SESSDATA, 'FAKE_TEST_TOKEN');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(store.encryptedPath).mode & 0o777, 0o600);
   cipher.isEncryptionAvailable = () => false;
   assert.equal(store.save({ SESSDATA: 'FAKE_TEST_TOKEN' }), false);
   assert.equal(fs.readdirSync(dir).length, 0);
@@ -75,12 +76,23 @@ test('web pairing binds the token to the approved origin and blocks framing', as
   // 未授权前拿不到 token
   assert.equal((await fetch(base + '/web-token', { headers: { Origin: origin } })).status, 403);
 
-  // 本机授权页提交（无 Origin → 本机直连允许），并绑定来源
-  const approve = await fetch(base + '/authorize-web', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ allow: true, origin })
-  });
-  assert.equal(approve.status, 200);
+  // 取授权页里的一次性随机数（跨源站点读不到页面内容，因此拿不到 nonce）
+  const nonceOf = html => {
+    const m = /var PAIR_NONCE=("([a-f0-9]+)")/.exec(html);
+    assert.ok(m, '授权页应包含一次性随机数');
+    return JSON.parse(m[1]);
+  };
+  const nonce = nonceOf(await pairPage.text());
+
+  // 缺少 nonce / 跨站 Origin / 非 JSON 类型都必须拒绝（CSRF 防护）
+  const approve = (body, headers = { 'Content-Type': 'application/json' }) =>
+    fetch(base + '/authorize-web', { method: 'POST', headers, body: JSON.stringify(body) });
+  assert.equal((await approve({ allow: true, origin })).status, 403);
+  assert.equal((await approve({ allow: true, origin, nonce }, { 'Content-Type': 'application/json', Origin: 'https://attacker.github.io' })).status, 403);
+  assert.equal((await approve({ allow: true, origin, nonce }, { 'Content-Type': 'text/plain' })).status, 403);
+
+  // 本机授权页提交（同源 / 无 Origin + 正确 nonce），并绑定来源
+  assert.equal((await approve({ allow: true, origin, nonce })).status, 200);
 
   // 绑定来源可取到 token
   const ok = await fetch(base + '/web-token', { headers: { Origin: origin } });
@@ -90,6 +102,7 @@ test('web pairing binds the token to the approved origin and blocks framing', as
   const other = await fetch(base + '/web-token', { headers: { Origin: 'https://attacker.github.io' } });
   assert.equal(other.status, 403);
 
-  // 清理授权状态，避免影响后续用例
-  await fetch(base + '/authorize-web', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ allow: false }) });
+  // 清理授权状态，避免影响后续用例（每次授权都需要重新获取 nonce）
+  const freshNonce = nonceOf(await (await fetch(base + '/pair')).text());
+  assert.equal((await approve({ allow: false, nonce: freshNonce })).status, 200);
 });

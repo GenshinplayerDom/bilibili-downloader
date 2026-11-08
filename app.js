@@ -2379,18 +2379,6 @@
   }
 
   /* ---------- MP3 转码 ---------- */
-  function floatTo16Slice(input, start, end) {
-    var len = end - start;
-    var out = new Int16Array(len);
-    for (var i = 0; i < len; i++) {
-      var s = input[start + i];
-      if (s > 1) s = 1;
-      else if (s < -1) s = -1;
-      out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    return out;
-  }
-
   function encodeMp3(buffer, kbps, onProgress, isCancelled) {
     return new Promise(function (resolve, reject) {
       var Enc = (typeof lamejs !== 'undefined') && lamejs.Mp3Encoder;
@@ -3673,7 +3661,6 @@
     clearBtn.hidden = !v;
     // 手动输入不再自动解析：仅清空输入框显隐；点击搜索 / 回车 / 粘贴时才触发加载
     if (v.length < 4) {
-      clearTimeout(debounceTimer);
       setFinderState('');
       setStatus('', '');
       resultEl.hidden = true;
@@ -3682,7 +3669,6 @@
   });
   inputEl.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && inputEl.value.trim()) {
-      clearTimeout(debounceTimer);
       var v = inputEl.value.trim();
       // 链接形态 → 解析；关键词 → 直接搜索（修复关键词回车无响应）
       if (/^(https?:)?\/\//i.test(v) || /^BV[0-9A-Za-z]{10}/i.test(v) || /^(av|ss|ep)\d+/i.test(v) || /space\.bilibili\.com/i.test(v)) {
@@ -3695,19 +3681,12 @@
   clearBtn.addEventListener('click', function () {
     inputEl.value = '';
     clearBtn.hidden = true;
-    clearTimeout(debounceTimer);
     setFinderState('');
     setStatus('', '');
     resultEl.hidden = true;
     current = null;
     inputEl.focus();
   });
-
-  var debounceTimer = null;
-  function debounceParse(v) {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(function () { startParse(v); }, 800);
-  }
 
   typeSeg.addEventListener('click', function (e) {
     var btn = e.target.closest('.seg-btn');

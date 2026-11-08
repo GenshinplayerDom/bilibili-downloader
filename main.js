@@ -97,12 +97,6 @@ async function restartProxy() {
 }
 
 /* ---------- 登录窗口 ---------- */
-function closeLoginWin() {
-  if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
-  if (loginWin && !loginWin.isDestroyed()) { loginWin.close(); }
-  loginWin = null;
-}
-
 function openLoginWindow() {
   return new Promise(function (resolve) {
     loginResolve = resolve;

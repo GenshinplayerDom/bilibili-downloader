@@ -29,6 +29,7 @@ var security = require('./lib/security');
 var accessToken = crypto.randomBytes(32).toString('hex');
 var webAuthorized = false;   // 网站端是否已被用户显式授权（配对）
 var authorizedOrigin = null; // 授权绑定的具体来源；null 表示未绑定（兼容仅本机打开授权页的旧流程）
+var pairNonce = null;        // /pair 每次渲染生成的一次性随机数，/authorize-web 必须回传，阻止跨站静默授权（CSRF）
 // 局域网共享模式（--lan 或环境变量 LAN=1）：
 // 让同一 WiFi 下的手机等设备访问电脑上的代理，供网站端使用。
 var LAN_MODE = process.argv.indexOf('--lan') >= 0 || /^(1|true|yes|on)$/i.test(process.env.LAN || '');
@@ -44,6 +45,19 @@ function lanAllowed(req) {
 /* 网站端来源白名单：主流静态托管域名（GitHub Pages / Vercel / Netlify / Cloudflare Pages / Surge） */
 function validWebOrigin(value) {
   return typeof value === 'string' && /^https:\/\/([a-z0-9-]+\.)?(github\.io|vercel\.app|netlify\.app|pages\.dev|surge\.sh)(:\d+)?$/.test(value);
+}
+/* 比较请求 Origin 与服务自身 Host：同源请求的 origin 恒为 http://<Host>，
+ * 这里额外兼顾 localhost 与 127.0.0.x 混用（端口必须一致）。 */
+function sameOriginHost(origin, host) {
+  try {
+    var parsed = new URL(origin);
+    if (parsed.protocol !== 'http:') return false;
+    var hostName = String(host || '');
+    if (parsed.host === hostName) return true;
+    var loopback = /^(127\.0\.0\.[123]|localhost)(:\d+)?$/;
+    return loopback.test(parsed.host) && loopback.test(hostName) &&
+      String(parsed.port) === String((/:([0-9]+)$/.exec(hostName) || [])[1] || '80');
+  } catch (e) { return false; }
 }
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -433,6 +447,7 @@ function handleRequest(req, res) {
     // 授权可绑定到具体来源（网站端在配对链接里带上 ?origin=<自身 origin>），
     // 避免"授权任意一个静态托管站点后，其他同后缀站点也能取到 token"。
     var pairOrigin = validWebOrigin(u.query.origin) ? String(u.query.origin) : '';
+    pairNonce = crypto.randomBytes(16).toString('hex');
     return res.end('<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>授权网站端</title>'
       + '<meta name="viewport" content="width=device-width,initial-scale=1"><style>'
       + 'body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0f1117;color:#e6e8ee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}'
@@ -449,25 +464,42 @@ function handleRequest(req, res) {
       + (webAuthorized ? '<p class="done">当前状态：已授权（网站端可直接使用）</p>' : '')
       + '<p><button class="ok" onclick="go(1)">授权</button><button class="no" onclick="go(0)">拒绝</button></p>'
       + '<p id="r"></p></div>'
-      + '<script>var PAIR_ORIGIN=' + JSON.stringify(pairOrigin) + ';function go(v){fetch("/authorize-web",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow:v===1,origin:PAIR_ORIGIN})})'
+      + '<script>var PAIR_ORIGIN=' + JSON.stringify(pairOrigin) + ';var PAIR_NONCE=' + JSON.stringify(pairNonce) + ';function go(v){fetch("/authorize-web",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow:v===1,origin:PAIR_ORIGIN,nonce:PAIR_NONCE})})'
       + '.then(r=>r.json()).then(j=>{document.getElementById("r").className=j.ok?"done":"";'
       + 'document.getElementById("r").textContent=j.ok?(j.allow?"✅ 已授权，请回到网站端刷新页面":"已拒绝，网站端将无法连接"):"操作失败";})}</script>'
       + '</body></html>');
   }
   if (u.pathname === '/authorize-web' && req.method === 'POST') {
     if (!isLoopbackOnly(req) && !lanAllowed(req)) return sendJson(res, 403, { ok: false, error: '只能在本机或局域网内授权' });
+    // 同源校验：同源 fetch 的 Origin 恒等于服务自身 origin；外部站点（尤其是 no-cors 的 text/plain POST）
+    // 会带上自己的 Origin，必须拒绝，否则任意网站都能静默替用户点「授权」并随后领走代理 token。
+    var reqOrigin = String(req.headers.origin || '');
+    var selfOrigin = 'http://' + String(req.headers.host || '');
+    if (reqOrigin && reqOrigin !== selfOrigin && !sameOriginHost(reqOrigin, req.headers.host)) {
+      return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
+    }
+    // 只接受 application/json：跨站想发 JSON 必须过预检，而本服务不响应 OPTIONS
+    if (!/application\/json/i.test(String(req.headers['content-type'] || ''))) {
+      return sendJson(res, 403, { ok: false, error: '请求类型不合法' });
+    }
     var ab = '';
     req.on('data', function (c) {
       ab += c;
       if (Buffer.byteLength(ab) > 65536) { req.destroy(); ab = ''; }   // 限制请求体大小，避免被超大 body 拖垮
     });
     return req.on('end', function () {
-      var allow = false, bodyOrigin = '';
+      var allow = false, bodyOrigin = '', nonce = '';
       try {
         var parsed = JSON.parse(ab || '{}');
         allow = !!parsed.allow;
         bodyOrigin = validWebOrigin(parsed.origin) ? String(parsed.origin) : '';
+        nonce = String(parsed.nonce || '');
       } catch (e) { }
+      // 一次性随机数：外部站点无法跨源读取 /pair 页面内容，因而拿不到 nonce
+      if (!pairNonce || nonce !== pairNonce) {
+        return sendJson(res, 403, { ok: false, error: '授权凭证已失效，请重新打开授权页' });
+      }
+      pairNonce = null;
       webAuthorized = allow;
       // 授权时绑定来源：允许即记录该 origin，拒绝则清空
       authorizedOrigin = allow ? (bodyOrigin || null) : null;
