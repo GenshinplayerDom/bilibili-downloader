@@ -68,19 +68,23 @@ const { execFileSync } = require('node:child_process');
     await page.evaluate(() => localStorage.setItem('bili_guide_seen_v2', '1'));
     await page.reload();
     await page.locator('#url-input').fill('BV1xx411c7mD');
+    // 当前 UI 设计为「手动输入不自动解析」，需回车（或粘贴）才触发解析
+    await page.locator('#url-input').press('Enter');
     await page.locator('#result').waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.locator('.page-chip img').count(), 0);
     assert.equal(await page.evaluate(() => !!window.injected), false);
-    await page.locator('[data-type="audio"]').click();
+    await page.locator('#type-seg [data-type="audio"]').click();
     await page.locator('#dl-btn').click();
     const first = page.locator('.task-card').nth(0);
     await first.locator('.task-pause').waitFor({ state: 'visible' });
-    await first.locator('.task-pause').click();
+    // 模拟流只有 ~1.3s，暂停按钮可能在等待『元素稳定』时就随任务完成而消失，故跳过稳定性检查
+    await first.locator('.task-pause').click({ force: true });
     await page.waitForFunction(() => document.querySelector('.task-status').textContent === '已暂停');
     // Clearing completed tasks must preserve paused ones.
     await page.locator('#tasks-clear-done').click();
     assert.equal(await page.locator('.task-card').count(), 1);
-    await first.locator('.task-pause').click();
+    // 暂停态按钮为 .task-resume（.task-pause 此时是隐藏的）
+    await first.locator('.task-resume').click({ force: true });
     await first.locator('.task-status.done').waitFor({ timeout: 15000 });
     const original = fs.readdirSync(downloads).find(name => name.endsWith('.m4a'));
     assert.ok(original); assert.equal(fs.statSync(path.join(downloads, original)).size, 65536);

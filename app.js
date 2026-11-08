@@ -420,8 +420,12 @@
       } else {
         proxyTip.className = 'proxy-tip bad';
         if (!window.biliAPI && !tokenMeta) {
-          var pairBase = (customProxyBase() ? customProxyBase().replace(/\/+$/, '') : 'http://127.0.0.1:8123');
-          tipHtml = '网站端需搭配本机代理并完成一次性授权：① 在电脑上运行 start-server.bat（Windows）或 node server.js（Mac / Linux）；② 在该电脑浏览器 <a href="' + pairBase + '/pair" target="_blank" rel="noopener" style="color:#ff3b7a;font-weight:700;text-decoration:underline;">打开授权页并点击「授权」</a>；③ 回本页刷新。手机使用：电脑改用 start-server.bat --lan（或 node server.js --lan），并在设置-代理-自定义地址填 http://&lt;电脑局域网IP&gt;:8123';
+          var rawBase = customProxyBase();
+          var pairBase = /^https?:\/\//i.test(rawBase) ? rawBase.replace(/\/+$/, '') : 'http://127.0.0.1:8123';
+          // 带上自身 origin，便于代理把授权绑定到具体来源（防止同后缀站点复用授权）
+          var pairLink = pairBase + '/pair' + (/^https?:\/\//i.test(location.origin) ? '?origin=' + encodeURIComponent(location.origin) : '');
+          // pairBase 来自用户设置（可被导入的设置文件篡改），拼进 href 前必须转义，避免 DOM XSS
+          tipHtml = '网站端需搭配本机代理并完成一次性授权：① 在电脑上运行 start-server.bat（Windows）或 node server.js（Mac / Linux）；② 在该电脑浏览器 <a href="' + escAttr(pairLink) + '" target="_blank" rel="noopener" style="color:#ff3b7a;font-weight:700;text-decoration:underline;">打开授权页并点击「授权」</a>；③ 回本页刷新。手机使用：电脑改用 start-server.bat --lan（或 node server.js --lan），并在设置-代理-自定义地址填 http://&lt;电脑局域网IP&gt;:8123';
         } else {
           tip = '代理未连接：请确认本地代理正在运行；网页版若刚重启过代理，请重新打开 http://127.0.0.1:8123/pair 授权后刷新，或点击设置中的「一键修复」';
         }
@@ -1744,6 +1748,7 @@
       var reader = res.body.getReader();
       var chunks = [];
       var received = 0;
+      var lastReport = 0;
       function pump() {
         if (check && check()) { try { reader.cancel(); } catch (e) { } return Promise.reject(new Error('已取消')); }
         return reader.read().then(function (r) {
@@ -1752,7 +1757,11 @@
           }
           chunks.push(r.value);
           received += r.value.length;
-          if (onProgress && total > 0) onProgress(received / total);
+          // 节流进度回调：逐 chunk 上报在高速网络下会产生大量无意义的上层更新
+          if (onProgress && total > 0) {
+            var now = Date.now();
+            if (now - lastReport >= 100) { lastReport = now; onProgress(received / total); }
+          }
           return pump();
         });
       }
@@ -1767,12 +1776,18 @@
     var received = new Array(n).fill(0);
     var urls = Array.isArray(targets) && targets.length ? targets : [targets];
 
-    function report() {
+    function report(force) {
       if (!onProgress) return;
+      // 节流：reader 每读到一个 chunk 都会回调，16 线程下可达数千次/秒；
+      // 100ms 合并一次，避免高频求和与上层 DOM 更新造成的开销。
+      var now = Date.now();
+      if (!force && now - lastReport < 100) return;
+      lastReport = now;
       var sum = 0;
       for (var k = 0; k < n; k++) sum += received[k];
       onProgress(Math.min(sum / total, 1));
     }
+    var lastReport = 0;
 
     function fetchPart(i, attempt) {
       attempt = attempt || 0;
@@ -1791,7 +1806,7 @@
           if (!res.body || !res.body.getReader) {
             return res.arrayBuffer().then(function (ab) {
               received[i] = ab.byteLength;
-              report();
+              report(true);
               return new Uint8Array(ab);
             });
           }
@@ -1801,12 +1816,14 @@
           // idle 停滞检测：分片传输中途长时间无数据（TCP 心跳保持连接但数据中断）时中止并触发重试
           var idleTimer = null;
           var idleSince = Date.now();
+          // 整段只建一个定时器，chunk 到达时仅刷新 idleSince；
+          // 若每次 read 前后都 clearInterval/setInterval，会形成大量定时器抖动与 GC 压力。
           function startIdleWatch() {
             idleSince = Date.now();
-            if (idleTimer) clearInterval(idleTimer);
+            if (idleTimer) return;
             idleTimer = setInterval(function () {
               if (Date.now() - idleSince > 20000) {
-                if (idleTimer) clearInterval(idleTimer);
+                if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
                 try { reader.cancel(); } catch (e) { }
               }
             }, 5000);
@@ -1816,7 +1833,8 @@
             if (check && check()) { stopIdleWatch(); try { reader.cancel(); } catch (e) { } return Promise.reject(new Error('已取消')); }
             startIdleWatch();
             return reader.read().then(function (r) {
-              stopIdleWatch();
+              idleSince = Date.now();
+              if (r.done) { stopIdleWatch(); }
               if (r.done) {
                 var all = new Uint8Array(got);
                 var off = 0;
@@ -4714,7 +4732,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.7.6';
+  var APP_VERSION = '1.7.7';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

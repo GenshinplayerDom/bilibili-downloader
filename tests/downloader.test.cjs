@@ -28,7 +28,7 @@ const data = Buffer.from(Array.from({ length: 6000 }, (_, i) => i % 251));
 test('parallel download preserves exact bytes and cleans temporary parts', { timeout: 5000 }, async t => {
   const f = await fixture(t, (req, res) => serve(data, req, res));
   const size = await f.downloader.download([f.base], f.dest, { threads: 8 });
-  assert.equal(size, data.length); assert.deepEqual(fs.readFileSync(f.dest), data);
+  assert.equal(size.size, data.length); assert.deepEqual(fs.readFileSync(f.dest), data);
   assert.deepEqual(fs.readdirSync(f.dir), ['result.mp4']);
 });
 test('server without Range support downloads once as a full stream', { timeout: 5000 }, async t => {
@@ -81,6 +81,35 @@ test('pause stops requests; resume keeps completed chunks', { timeout: 8000 }, a
   control.resume(); await job;
   assert.deepEqual(fs.readFileSync(f.dest), data);
   assert.equal(requests.filter(range => range === 'bytes=0-1023').length, 1);
+});
+test('paused download keeps parts for resume even when destination already exists', { timeout: 8000 }, async t => {
+  const f = await fixture(t, (req, res) => {
+    if (req.headers.range === 'bytes=0-0') return serve(data, req, res);
+    const timer = setTimeout(() => serve(data, req, res), 40);
+    res.on('close', () => clearTimeout(timer));
+  });
+  // 模拟 main.js reserveOutput：目标文件在下载开始前就被独占创建为空文件
+  fs.writeFileSync(f.dest, '');
+  const control = new DownloadControl();
+  let tempDir = null, paused = false;
+  const job = f.downloader.download(f.base, f.dest, {
+    threads: 1, control, keepPartsOnAbort: true,
+    onTemp: td => { tempDir = td; },
+    onProgress: (_, bytes) => {
+      if (!paused && bytes >= 2048) {
+        paused = true;
+        control.pause();
+        // 模拟"暂停后退出应用"：before-quit 会 cancel 所有任务
+        setTimeout(() => control.cancel(), 50);
+      }
+    }
+  });
+  await assert.rejects(job, { code: 'CANCELLED' });
+  assert.ok(tempDir && fs.existsSync(tempDir), '暂停后应保留分片目录用于续传');
+  // 保留的分片应能被后续任务复用并得到完整字节
+  const resumed = await f.downloader.download(f.base, f.dest, { threads: 1, resumeDir: tempDir });
+  assert.equal(resumed.size, data.length);
+  assert.deepEqual(fs.readFileSync(f.dest), data);
 });
 test('cancel interrupts an in-flight request and cleans partial data', { timeout: 5000 }, async t => {
   let began;

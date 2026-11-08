@@ -12,6 +12,8 @@
   --ok: #34a853;
   --bad: #ea4335;
   --warn: #f59a23;
+  --hover: #f6f8ff;
+  --checked: #eef3ff;
   --shadow: 0 2px 12px rgba(31, 35, 41, 0.08);
 }
 /* 深色模式（功能14） */
@@ -21,13 +23,18 @@ html[data-theme="dark"] {
   --line: #343842;
   --text: #e6e8eb;
   --sub: #9aa0aa;
+  --hover: #242832;
+  --checked: #2a2e38;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  /* 原生控件深色：select 展开面板、滚动条等自动跟随深色主题 */
+  color-scheme: dark;
 }
 html[data-theme="dark"] body { background: var(--bg); }
 html[data-theme="dark"] .card,
 html[data-theme="dark"] .set-section,
 html[data-theme="dark"] .task-item,
 html[data-theme="dark"] .history-panel,
+html[data-theme="dark"] .queue-panel,
 html[data-theme="dark"] .settings-panel,
 html[data-theme="dark"] .toast { background: var(--card); border-color: var(--line); color: var(--text); }
 html[data-theme="dark"] input, html[data-theme="dark"] select, html[data-theme="dark"] button,
@@ -35,6 +42,35 @@ html[data-theme="dark"] textarea {
   background: #262a33; color: var(--text); border-color: #3a3f4b;
 }
 html[data-theme="dark"] .player-box { background: #0f1013; }
+/* 深色补充覆盖：列表/搜索页、分段按钮、徽章、封面底色等未随主题切换的元素 */
+html[data-theme="dark"] .type-seg { background: #262a33; border-color: #3a3f4b; }
+html[data-theme="dark"] .seg-btn { color: var(--sub); }
+html[data-theme="dark"] .seg-btn.active { background: #313642; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+html[data-theme="dark"] .login-badge { background: #262a33; color: var(--sub); border-color: #3a3f4b; }
+html[data-theme="dark"] .list-cover { background: #2a2e38; }
+html[data-theme="dark"] .list-table tr:nth-child(even) { background: #1b1e24; }
+html[data-theme="dark"] .list-table td { border-color: var(--line); }
+/* 高优先级深色覆盖：输入框 / danger 按钮 / 历史条目等仍残留浅色的元素 */
+html[data-theme="dark"] #url-input,
+html[data-theme="dark"] #url-input:focus,
+html[data-theme="dark"] #custom-proxy,
+html[data-theme="dark"] #clip-input,
+html[data-theme="dark"] #pager-input,
+html[data-theme="dark"] .opt-row input[type="text"],
+html[data-theme="dark"] .opt-row input[type="time"],
+html[data-theme="dark"] #proxy-port { background: #262a33; color: var(--text); border-color: #3a3f4b; }
+html[data-theme="dark"] .mini-btn.danger { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
+html[data-theme="dark"] .mini-btn.danger:hover { background: #4a2830; }
+html[data-theme="dark"] .hist-item { background: #1f2229; border-color: var(--line); }
+html[data-theme="dark"] .hist-item .hist-actions button { background: #262a33; color: var(--text); border-color: #3a3f4b; }
+html[data-theme="dark"] .hist-item .hist-actions button.danger { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
+/* 深色：下载任务卡 / 进度条底色 */
+html[data-theme="dark"] .task-card { background: #1b1e24; border-color: var(--line); }
+html[data-theme="dark"] .task-bar { background: #2a2e38; }
+html[data-theme="dark"] .task-card .task-head button { background: #262a33; color: var(--text); border-color: #3a3f4b; }
+html[data-theme="dark"] .task-card .task-head button.task-cancel { background: #3a2024; color: #ff8a8a; border-color: #54303a; }
+/* 深色：列表勾选行高亮用中性灰度，避免浅蓝白刺眼 */
+html[data-theme="dark"] .list-table tbody tr.row-checked { background: #2a2e38; }
 
 /* 无障碍（优化15）：键盘焦点可见 */
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
@@ -99,7 +135,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 80;
+  z-index: 110;
 }
 .rail-btn {
   width: 42px; height: 42px;
@@ -113,6 +149,16 @@ body {
   transition: transform 0.15s;
 }
 .rail-btn:hover { transform: scale(1.08); }
+/* 外观切换按钮：点击后切换形态并变色（太阳=浅色 / 月亮=深色） */
+.rail-btn.theme-toggle {
+  background: linear-gradient(135deg, #ffb347, #ff8c00);
+  box-shadow: 0 4px 14px rgba(255, 165, 0, 0.45);
+}
+.rail-btn.theme-toggle.active {
+  background: linear-gradient(135deg, #5c6bc0, #3f51b5);
+  box-shadow: 0 4px 14px rgba(92, 107, 192, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+}
 .rail-btn.alt {
   background: linear-gradient(135deg, #7c8cf8, #5b6ee1);
   box-shadow: 0 4px 14px rgba(124, 140, 248, 0.4);
@@ -158,6 +204,81 @@ body {
   color: var(--muted);
   font-size: 14px;
 }
+
+/* ---------- 下载队列页（布局参考悬浮窗） ---------- */
+.queue-panel {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 8px;
+}
+.queue-head h2 { margin: 0; font-size: 18px; color: var(--ink); }
+.queue-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.queue-head .icon-btn { margin-left: 0; }
+.queue-sub {
+  padding: 0 16px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.queue-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ---------- 悬浮窗拖动 ---------- */
+body.overlay-active .tasks-card { cursor: grab; }
+body.overlay-active .tasks-card.dragging { cursor: grabbing; user-select: none; }
+.tasks-title { cursor: grab; }
+.tasks-title:active { cursor: grabbing; }
+.tasks-title .task-min { margin-left: 0; }
+
+/* ---------- 最小化小球 ---------- */
+.task-orb {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 90;
+  min-width: 56px;
+  height: 56px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 28px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: grab;
+  box-shadow: 0 6px 20px rgba(251, 114, 153, 0.45);
+  user-select: none;
+}
+.task-orb:active { cursor: grabbing; }
+body.no-select { user-select: none; }
+
 .hist-item {
   background: #fff;
   border: 1px solid var(--line);
@@ -267,6 +388,21 @@ body {
   background: #fafbfc;
 }
 #url-input:focus { border-color: var(--brand); background: #fff; }
+#search-btn {
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 8px rgba(251, 114, 153, 0.3);
+}
+#search-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(251, 114, 153, 0.4); }
+#search-btn:active { transform: translateY(0); }
 #clear-btn {
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -293,11 +429,29 @@ body {
 /* ---------- 视频卡片（紧凑） ---------- */
 .video-card { display: flex; gap: 12px; }
 .cover-wrap {
+  position: relative;
   width: 120px; height: 76px;
   border-radius: 8px; overflow: hidden;
   background: #f0f1f3;
   flex: none;
 }
+.cover-wrap:hover .cover-play-btn { opacity: 1; pointer-events: auto; }
+.cover-play-btn {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 56px; height: 56px;
+  margin: -28px 0 0 -28px;
+  border: none; border-radius: 50%;
+  background: rgba(0,0,0,.55);
+  color: #fff; font-size: 22px;
+  line-height: 1; padding-left: 4px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s, transform .15s, background .15s;
+  z-index: 2;
+}
+.cover-play-btn:hover { background: rgba(251,114,153,.9); transform: scale(1.08); }
 .cover-wrap img { width: 100%; height: 100%; object-fit: cover; }
 .video-meta { flex: 1; min-width: 0; }
 .v-title {
@@ -472,6 +626,7 @@ body {
   left: 50%;
   transform: translateX(-50%);
   z-index: 200;
+  pointer-events: none;
   background: rgba(31, 35, 41, 0.92);
   color: #fff;
   font-size: 13px;
@@ -488,6 +643,20 @@ body {
   transform: translateX(-50%) translateY(-8px);
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- v1.6.6：支持作者弹窗 ---------- */
+.support-box { max-width: 440px; }
+.support-body { padding: 18px 22px 22px; text-align: center; }
+.support-msg { font-size: 15px; font-weight: 700; color: var(--brand-dark, #d84a72); margin: 0 0 14px; }
+.support-tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 16px; }
+.support-tab {
+  padding: 7px 18px; border: 1px solid var(--border, #e3e6ee); border-radius: 20px;
+  background: #fff; cursor: pointer; font-size: 13px; color: #555; transition: all .15s;
+}
+.support-tab.active { background: linear-gradient(135deg, var(--brand), var(--brand-dark)); color: #fff; border-color: transparent; }
+.support-qr { display: flex; justify-content: center; }
+.support-qr img { width: 260px; max-width: 100%; border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+.support-note { font-size: 12px; color: var(--muted, #888); margin: 14px 0 0; }
 
 /* ---------- 左侧竖向侧边栏（参考左侧 UI） ---------- */
 .settings-mask {
@@ -879,3 +1048,178 @@ body {
 .batch-item-state.running { color: #1565c0; }
 .mini-btn.primary { background: var(--accent, #fb7299); border-color: var(--accent, #fb7299); color: #fff; }
 .mini-btn.primary:disabled { opacity: .55; cursor: wait; }
+
+/* ---------- v1.4：合集/收藏夹视频表格列表 ---------- */
+.list-panel {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--bg, #f5f6fa);
+  display: flex; flex-direction: column;
+  padding: 18px 22px; box-sizing: border-box;
+}
+.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.list-head h2 { margin: 0; font-size: 18px; }
+.list-head-actions { display: flex; gap: 8px; align-items: center; }
+.list-sub { color: var(--muted, #888); font-size: 12px; margin-bottom: 10px; }
+.list-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.list-toolbar-spacer { flex: 1; }
+.list-table-wrap { flex: 1; overflow-y: auto; background: var(--card); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
+.list-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.list-table th { position: sticky; top: 0; background: var(--card); text-align: left; padding: 10px 10px; font-size: 12px; color: var(--muted, #888); border-bottom: 1px solid var(--border, #e3e6ee); z-index: 1; }
+.list-table td { padding: 8px 10px; border-bottom: 1px solid var(--border, #f0f1f5); vertical-align: middle; font-size: 13px; }
+.list-table tbody tr { cursor: pointer; }
+.list-table tbody tr:hover { background: var(--hover, #f6f8ff); }
+.list-table tbody tr.row-checked { background: var(--checked, #eef3ff); }
+.col-check { width: 44px; text-align: center; border-radius: 6px; transition: background .15s; }
+.col-check:hover { background: rgba(251, 114, 153, 0.07); }
+.col-cover { width: 92px; }
+.col-title { width: auto; }
+.col-play { width: 92px; }
+.col-danmaku { width: 78px; }
+.col-dur { width: 70px; text-align: right; }
+.list-table input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.list-cover { width: 82px; height: 48px; object-fit: cover; border-radius: 6px; background: #eee; display: block; }
+.list-title-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 8px;
+  flex-wrap: wrap;
+}
+.pager-pages { display: flex; gap: 4px; align-items: center; }
+.pager-page-btn {
+  min-width: 30px; height: 28px;
+  border: 1px solid var(--line, #e3e6ee);
+  border-radius: 6px;
+  background: var(--card, #fff); color: var(--text, #333);
+  font-size: 12.5px; cursor: pointer;
+}
+.pager-page-btn:hover { border-color: var(--brand, #fb7299); color: var(--brand, #fb7299); }
+.pager-page-btn.active { background: var(--brand, #fb7299); border-color: var(--brand, #fb7299); color: #fff; }
+.pager-jump { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted, #888); }
+.pager-jump input { width: 52px; height: 26px; border: 1px solid var(--line, #e3e6ee); border-radius: 6px; padding: 0 6px; font-size: 12.5px; background: var(--card, #fff); color: var(--text, #333); }
+.list-empty { padding: 30px; text-align: center; color: var(--muted, #888); }
+.list-detail-back { margin-left: 10px; }
+
+/* 主菜单按钮 */
+.home-btn { background: transparent; border: 1px solid var(--border, #e3e6ee); color: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; cursor: pointer; margin-right: 8px; }
+.home-btn:hover { background: var(--hover, #f0f2f7); }
+
+/* 危险按钮 */
+.mini-btn.danger { background: #fdecea; color: #d93026; border-color: #f5b8b2; }
+.mini-btn.danger:hover { background: #fbd9d5; }
+
+/* 任务排队状态 */
+.task-status.queued { color: #b8860b; }
+
+/* 列表面板下载选项行 */
+.list-options { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 12px; background: var(--card); border: 1px solid var(--border, #e3e6ee); border-radius: 10px; }
+.list-options .opt-row { margin: 0; }
+.list-options label { font-size: 12px; color: var(--muted, #888); margin-right: 4px; }
+.list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card); font-size: 12px; }
+
+/* 覆盖面板（列表 / 批量）打开时：任务卡悬浮于底部可见 */
+body.overlay-active .tasks-card {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 40px));
+  z-index: 65;
+  max-height: 36vh;
+  overflow-y: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+}
+
+/* ================= v1.6.6-Android 手机适配 ================= */
+@media (max-width: 520px) {
+  .container { max-width: 100%; padding: 0 10px; gap: 8px; }
+  .header-text h1 { font-size: 16px; }
+  .header-text p { display: none; }
+  .header-right { gap: 6px; }
+  .header-right .set-btn, .header-right button { padding: 8px 10px; font-size: 12px; }
+
+  /* 输入框与按钮：加大触控面积 */
+  input[type="text"], input[type="url"], input[type="number"], input[type="password"],
+  input[type="time"], select, textarea {
+    min-height: 42px;
+    font-size: 15px;
+  }
+  .btn, .set-btn, .opt-row select, .task-actions button, .search-btn, .primary-btn, button.action {
+    min-height: 40px;
+    padding: 9px 14px;
+    font-size: 14px;
+  }
+  .opt-row { flex-wrap: wrap; gap: 6px; }
+  .opt-row label { width: auto; }
+
+  /* 视频卡片：竖排、封面更大、信息紧凑 */
+  .video-card { flex-direction: column; gap: 8px; padding: 10px; }
+  .cover-wrap { width: 100%; height: 176px; }
+  .video-info { padding: 0; }
+  .video-title { font-size: 15px; line-height: 1.35; }
+
+  /* 表格：横向可滚动，避免挤压 */
+  .table-wrap, .list-panel table, table.data { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.data th, table.data td { white-space: nowrap; padding: 8px 10px; font-size: 13px; }
+
+  /* 设置面板：全屏贴合手机 */
+  .settings-panel { width: 100%; max-width: 100%; box-shadow: none; }
+  .settings-body { padding: 12px 14px 30px; }
+  .settings-head { padding: 14px 14px; }
+  .settings-head h2 { font-size: 17px; }
+  .set-section { padding: 10px 0; }
+  .set-row { flex-wrap: wrap; }
+  .set-row .set-label { width: auto; min-width: 76px; }
+  .set-btn { width: 100%; margin-top: 6px; }
+
+  /* 悬浮窗 / 队列面板 / 弹窗：全宽 */
+  .float-window, .queue-panel, .player-modal, .support-box {
+    width: 100% !important; max-width: 100% !important;
+    left: 0 !important; right: 0 !important; bottom: 0 !important;
+    border-radius: 14px 14px 0 0 !important;
+  }
+  .player-modal { align-items: flex-end; }
+  .player-box { width: 100% !important; max-width: 100% !important; border-radius: 14px 14px 0 0 !important; max-height: 82vh; }
+  .support-qr img { width: 220px; }
+
+  /* 任务卡：紧凑 */
+  .task-card { padding: 10px; }
+  .task-name { font-size: 13px; }
+  .progress-bar { height: 14px; }
+
+  /* 下载记录行 / 历史列表：紧凑大触控 */
+  .his-row, .dl-row, .queue-row { padding: 10px 8px; min-height: 52px; }
+  .his-row button, .dl-row button, .queue-row button { min-height: 36px; padding: 7px 10px; }
+
+  /* 引导弹窗 */
+  .guide-box { max-width: 100%; padding: 18px 16px; max-height: 90vh; }
+
+  /* 搜索区 */
+  .search-bar { flex-wrap: wrap; }
+  .search-bar input { flex: 1 1 100%; }
+  .search-bar .btn { flex: 1; }
+
+  /* 底部入口（历史 / 队列 / 设置 / 主菜单）大触控 */
+  .bottom-nav button, .side-nav button { min-height: 46px; font-size: 13px; }
+
+  /* 悬浮球 */
+  .float-dot { width: 46px; height: 46px; font-size: 18px; }
+
+  /* 安全区适配（刘海屏 / 手势条） */
+  body { padding-bottom: env(safe-area-inset-bottom, 0); }
+  .bottom-nav, .side-nav { padding-bottom: env(safe-area-inset-bottom, 0); }
+  .settings-panel { padding-bottom: calc(env(safe-area-inset-bottom, 0) + 16px); }
+
+  /* 防止横向溢出与滚动卡顿 */
+  html, body { overflow-x: hidden; }
+  * { -webkit-tap-highlight-color: transparent; }
+  .container, .video-card, .task-card, .his-row, .dl-row, .queue-row {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 输入框聚焦时不放大（iOS/Android 字体>=16px 不缩放） */
+  input[type="text"], input[type="url"], input[type="number"], input[type="password"],
+  input[type="time"], select, textarea { font-size: 16px; }
+}

@@ -28,6 +28,7 @@ var fsMod = require('fs');
 var security = require('./lib/security');
 var accessToken = crypto.randomBytes(32).toString('hex');
 var webAuthorized = false;   // 网站端是否已被用户显式授权（配对）
+var authorizedOrigin = null; // 授权绑定的具体来源；null 表示未绑定（兼容仅本机打开授权页的旧流程）
 // 局域网共享模式（--lan 或环境变量 LAN=1）：
 // 让同一 WiFi 下的手机等设备访问电脑上的代理，供网站端使用。
 var LAN_MODE = process.argv.indexOf('--lan') >= 0 || /^(1|true|yes|on)$/i.test(process.env.LAN || '');
@@ -40,10 +41,18 @@ function isLoopbackOnly(req) {
 function lanAllowed(req) {
   return LAN_MODE && !!String(req.headers.host || '').trim();
 }
+/* 网站端来源白名单：主流静态托管域名（GitHub Pages / Vercel / Netlify / Cloudflare Pages / Surge） */
+function validWebOrigin(value) {
+  return typeof value === 'string' && /^https:\/\/([a-z0-9-]+\.)?(github\.io|vercel\.app|netlify\.app|pages\.dev|surge\.sh)(:\d+)?$/.test(value);
+}
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 var onCookiesChanged = null;
 
 var PORT = parseInt(process.env.PORT, 10) || 8123;
-var HOST = '127.0.0.1';
 
 var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -58,15 +67,6 @@ var identity = {
 
 /* ---------- 用户登录 Cookie（设置页登录后注入，用于获取更高清晰度） ---------- */
 var userCookies = {};          // { SESSDATA, bili_jct, DedeUserID, DedeUserID__ckMd5, ... }
-var userDataDir = null;
-
-function setUserDataDir(dir) {
-  userDataDir = dir;
-}
-
-function loadUserCookies() {
-  // Persistence belongs to Electron's encrypted CookieStore.
-}
 
 function saveUserCookies() {
   if (onCookiesChanged) onCookiesChanged(userCookies);
@@ -377,6 +377,8 @@ function sendJson(res, status, obj) {
   setCors(res);
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
   res.end(JSON.stringify(obj));
 }
 
@@ -424,6 +426,13 @@ function handleRequest(req, res) {
     if (!isLoopbackOnly(req) && !lanAllowed(req)) return sendJson(res, 403, { ok: false, error: '配对页只能在本机或局域网内打开' });
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    // 防点击劫持：授权页不得被任意站点 iframe 嵌套后诱导点击「授权」
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    res.setHeader('Cache-Control', 'no-store');
+    // 授权可绑定到具体来源（网站端在配对链接里带上 ?origin=<自身 origin>），
+    // 避免"授权任意一个静态托管站点后，其他同后缀站点也能取到 token"。
+    var pairOrigin = validWebOrigin(u.query.origin) ? String(u.query.origin) : '';
     return res.end('<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>授权网站端</title>'
       + '<meta name="viewport" content="width=device-width,initial-scale=1"><style>'
       + 'body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0f1117;color:#e6e8ee;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}'
@@ -436,10 +445,11 @@ function handleRequest(req, res) {
       + '<p class="p">你正在允许部署在 GitHub Pages / Vercel 等静态托管上的「哔哩下载器网站端」连接本机代理。<br>'
       + '授权后网站端可解析、搜索、下载 B 站视频；登录态 Cookie 仍只保存在本机。<br>'
       + '如非你本人操作，请点击拒绝。</p>'
+      + (pairOrigin ? '<p class="p"><b>请求来源：</b>' + escapeHtml(pairOrigin) + '</p>' : '')
       + (webAuthorized ? '<p class="done">当前状态：已授权（网站端可直接使用）</p>' : '')
       + '<p><button class="ok" onclick="go(1)">授权</button><button class="no" onclick="go(0)">拒绝</button></p>'
       + '<p id="r"></p></div>'
-      + '<script>function go(v){fetch("/authorize-web",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow:v===1})})'
+      + '<script>var PAIR_ORIGIN=' + JSON.stringify(pairOrigin) + ';function go(v){fetch("/authorize-web",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({allow:v===1,origin:PAIR_ORIGIN})})'
       + '.then(r=>r.json()).then(j=>{document.getElementById("r").className=j.ok?"done":"";'
       + 'document.getElementById("r").textContent=j.ok?(j.allow?"✅ 已授权，请回到网站端刷新页面":"已拒绝，网站端将无法连接"):"操作失败";})}</script>'
       + '</body></html>');
@@ -447,11 +457,20 @@ function handleRequest(req, res) {
   if (u.pathname === '/authorize-web' && req.method === 'POST') {
     if (!isLoopbackOnly(req) && !lanAllowed(req)) return sendJson(res, 403, { ok: false, error: '只能在本机或局域网内授权' });
     var ab = '';
-    req.on('data', function (c) { ab += c; });
+    req.on('data', function (c) {
+      ab += c;
+      if (Buffer.byteLength(ab) > 65536) { req.destroy(); ab = ''; }   // 限制请求体大小，避免被超大 body 拖垮
+    });
     return req.on('end', function () {
-      var allow = false;
-      try { allow = !!JSON.parse(ab || '{}').allow; } catch (e) { }
+      var allow = false, bodyOrigin = '';
+      try {
+        var parsed = JSON.parse(ab || '{}');
+        allow = !!parsed.allow;
+        bodyOrigin = validWebOrigin(parsed.origin) ? String(parsed.origin) : '';
+      } catch (e) { }
       webAuthorized = allow;
+      // 授权时绑定来源：允许即记录该 origin，拒绝则清空
+      authorizedOrigin = allow ? (bodyOrigin || null) : null;
       sendJson(res, 200, { ok: true, allow: allow });
     });
   }
@@ -461,6 +480,8 @@ function handleRequest(req, res) {
     if (!hostOk2 || !(webOrigin || origin === 'null' || isLoopbackOnly(req))) return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
     if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
     if (!webAuthorized) return sendJson(res, 403, { ok: false, error: '网站端尚未授权，请在本机打开 http://127.0.0.1:' + PORT + '/pair 完成授权' });
+    // 已绑定来源时，只向该来源发放 token（防止同后缀的其他站点复用授权）
+    if (authorizedOrigin && origin !== authorizedOrigin) return sendJson(res, 403, { ok: false, error: '该来源未被授权，请重新配对' });
     return sendJson(res, 200, { ok: true, token: accessToken, port: PORT });
   }
 
@@ -636,7 +657,8 @@ function start(port) {
     var list = results.map(function (result) { return result.value; });
     console.log('哔哩下载器内置代理已启动（' + hosts.join(' / ') + ':' + port + '）');
     if (LAN_MODE) {
-      webAuthorized = true;   // 局域网共享模式下，本机启动即视为已授权网站端
+      // 安全：局域网模式不再启动即自动授权。任何可访问本端口的设备/站点都应先由用户
+      // 在 /pair 页面显式点击「授权」，避免同网段内第三方站点静默取得代理 token。
       var addrs = [];
       try {
         var ifs = os.networkInterfaces();
@@ -651,6 +673,7 @@ function start(port) {
         console.log('  http://' + a + ':' + port);
       });
       console.log('授权页：http://127.0.0.1:' + port + '/pair（或 http://<局域网IP>:' + port + '/pair）');
+      console.log('首次使用需在授权页点击「授权」完成一次性配对（本版本不再自动授权）。');
     }
     return list;
   }).catch(function (error) { return stop().then(function () { throw error; }); });
@@ -671,7 +694,6 @@ module.exports = {
   start: start,
   stop: stop,
   LISTEN_HOSTS: LISTEN_HOSTS,
-  setUserDataDir: setUserDataDir,
   setUserCookies: setUserCookies,
   getUserLoginInfo: getUserLoginInfo,
   getProxyPort: function () { return PORT; },

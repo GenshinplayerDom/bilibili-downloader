@@ -1,3 +1,35 @@
+# 1.7.7
+
+## 安全
+
+- 代理目标端口策略收紧：`api` / `expand` 类型强制 443，仅 `media`（CDN 直链）保留随机端口，修复 `https://api.bilibili.com:<任意端口>` 可被放行的问题（SSRF / 端口探测面）。
+- 网站端授权绑定来源：`/pair` 可携带 `?origin=<自身域名>`，授权后 `/web-token` 只向该来源发放 token，防止同后缀静态托管站点复用授权。
+- 局域网模式不再启动即自动授权（`webAuthorized=true` 移除），必须由用户在 `/pair` 页显式点击「授权」。
+- 授权页补 `X-Frame-Options: DENY` 与 `frame-ancestors 'none'` CSP，阻止第三方站点 iframe 嵌套诱导点击（点击劫持）。
+- `/authorize-web` 请求体限制 64KB；`sendJson` 补 `X-Content-Type-Options: nosniff` 与 `Cache-Control: no-store`。
+- 主进程 `bili:open-external` 改用统一 `ipcHandle`，补齐渲染层来源校验（此前绕过 `trustedSender`）。
+- `directDownload`（弹幕 / 字幕 / 封面）补 URL 白名单校验与 5 跳重定向上限，避免任意地址与重定向死循环。
+- 前端代理提示里的自定义代理地址做协议校验 + 属性转义，修复设置被导入篡改时的 DOM XSS。
+
+## 修复
+
+- **跨重启续传失效**：`reserveOutput` 会预创建空目标文件，旧逻辑以 `!fs.existsSync(dest)` 判断是否保留分片，导致暂停/退出后分片被删除、续传永远无法恢复。改为仅按暂停/取消状态保留分片。
+- 油猴脚本「下载视频」改用 `fnval=1`（durl 合流 MP4，含音频轨）；此前 `fnval=16` 只下载 DASH 视频轨，成品**无声音**；无合流 MP4 时明确提示并标注。
+- 油猴脚本 WBI 签名补齐参数值 `!'()*` 字符过滤，与桌面版算法一致。
+- 油猴脚本 cid 识别增加 `view` 接口兜底，页面正则取不到时不再整段失败。
+
+## 性能
+
+- `estimateUrlsBytes` 改为并发探测，磁盘预检不再串行等待多条媒体流往返。
+- 浏览器端分段下载：idle 停滞检测由「每个 chunk 重建定时器」改为「整段复用单个定时器」，消除数千次/秒的定时器抖动；进度回调按 100ms 节流。
+- 单分片下载（服务端不支持 Range，或文件小于一个分片）直接改名落盘，跳过「读一遍再写一遍」的整文件复制。
+
+## 构建
+
+- `scripts/check.cjs` / `scripts/sync-android.cjs` 修正 Android 资产路径（`android/app/src/main/assets`），此前指向不存在的 `哔哩下载器-android-1.3.0/`，导致 `npm run check` 与 `npm run assets:android` 无法运行。
+- 更正 `download()` 返回值断言（`{ size, tempDir }` 对象）。
+- 新增回归测试：授权来源绑定与防嵌套、暂停保留分片、单分片快速路径。
+
 # 1.7.6
 
 ## 修复

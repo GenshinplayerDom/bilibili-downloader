@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
-// @version      1.2.0
+// @version      1.3.0
 // @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
 // @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
@@ -91,7 +91,10 @@
   }
   function wbiSign(params) {
     var p = Object.assign({}, params, { wts: Math.round(Date.now() / 1000) });
-    var q = Object.keys(p).sort().map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
+    // B 站 WBI 算法要求先剔除参数值中的 !'()* 再做 encode（与桌面版 wbiSignUrl 保持一致）
+    var q = Object.keys(p).sort().map(function (k) {
+      return k + '=' + encodeURIComponent(String(p[k]).replace(/[!'()*]/g, ''));
+    }).join('&');
     p.w_rid = md5(q + mixinKey(WBI_KEY));
     return p;
   }
@@ -121,6 +124,15 @@
   function getTitle() {
     var t = $('h1') || $('.video-info-title') || document.title;
     return (t ? t.textContent.trim() : document.title.replace(/_[^_]*$/, '')).slice(0, 60);
+  }
+  /* cid 兜底：页面文本里找不到时，用 view 接口取第一分 P 的 cid */
+  function resolveCid(bvid, cid) {
+    if (cid) return Promise.resolve(cid);
+    return apiGet('https://api.bilibili.com/x/web-interface/view', { bvid: bvid }).then(function (d) {
+      var p = (d.pages && d.pages[0]) || d;
+      if (!p || !p.cid) throw new Error('未能解析视频 cid');
+      return p.cid;
+    });
   }
 
   /* ---------- UI ---------- */
@@ -160,14 +172,20 @@
   }
 
   function doDownload(type) {
-    var bvid = getBvid(), cid = getCid();
-    if (!bvid || !cid) { st('未识别到视频（bvid=' + bvid + ' cid=' + cid + '）'); return; }
+    var bvid = getBvid();
+    if (!bvid) { st('未识别到视频（bvid=' + bvid + '）'); return; }
+    var cid = getCid();
     var qn = Number(box.querySelector('#bd-qn').value);
-    var fnval = type === 'audio' ? 4048 : 16;
+    // 视频用 fnval=1（传统 durl 合流 MP4，自带音频轨）；fnval=16 是 DASH 分离流，
+    // 只下视频轨会得到无声文件（桌面版靠 ffmpeg 合流，油猴版无法合流）。
+    var fnval = type === 'audio' ? 4048 : 1;
     var fn = 'bili_' + bvid + '_' + (type === 'audio' ? 'audio' : QNS[qn] || qn);
     st('获取下载地址…');
-    apiGet('https://api.bilibili.com/x/player/playurl', { bvid: bvid, cid: cid, qn: qn, fnval: fnval, fourk: 1 }).then(function (d) {
-      var url = null, name = '';
+    // 页面 HTML 里抓不到 cid 时，回退到 view 接口取第一分 P 的 cid，避免整段失败
+    resolveCid(bvid, cid).then(function (realCid) {
+      return apiGet('https://api.bilibili.com/x/player/playurl', { bvid: bvid, cid: realCid, qn: qn, fnval: fnval, fourk: 1 });
+    }).then(function (d) {
+      var url = null, name = '', dashOnly = false;
       if (type === 'audio') {
         var audios = (d.dash && d.dash.audio) || [];
         if (!audios.length) throw new Error('无音频流');
@@ -181,10 +199,11 @@
           var v = d.dash.video[0];
           url = v.baseUrl || v.base_url;
           name = fn + '_' + (QNS[d.quality] || d.quality) + '_dash.m4s';
+          dashOnly = true;   // 该视频没有合流 MP4，只能拿到无声的视频轨
         }
       }
       if (!url) throw new Error('未获取到下载地址（可能需要登录或该清晰度不可用）');
-      st('获取成功（' + name.split('_').pop() + '）');
+      st(dashOnly ? '⚠ 该视频仅提供 DASH 分离流，下载文件不含音轨（需自行合流）' : '获取成功（' + name.split('_').pop() + '）');
       download(url, name);
       if (typeof GM_notification === 'function') GM_notification({ title: '哔哩下载器', text: '开始下载：' + name, timeout: 3000 });
     }).catch(function (e) {

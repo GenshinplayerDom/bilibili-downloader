@@ -269,12 +269,15 @@ function diskFreeBytes(dir) {
   } catch (e) { return Infinity; }
 }
 function fmtBytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + 'GB' : (n / 1048576).toFixed(0) + 'MB'; }
-/** 估算一组媒体流的字节数（仅用于磁盘预检，探测失败不阻塞） */
+/** 估算一组媒体流的字节数（仅用于磁盘预检，探测失败不阻塞）。
+ *  并发探测：多流（视频+音频+多 CDN 备选）串行探测会串起多次往返，
+ *  拉开下载前的等待；并行探测显著缩短预检耗时。 */
 async function estimateUrlsBytes(urls) {
+  const results = await Promise.allSettled((urls || []).map(u =>
+    downloader.probe(u, new AbortController().signal)));
   let total = 0;
-  for (const u of urls) {
-    try { const info = await downloader.probe(u, new AbortController().signal); total += info.total || 0; }
-    catch (e) { /* 探测失败不阻断下载 */ }
+  for (const r of results) {
+    if (r.status === 'fulfilled') total += r.value.total || 0;
   }
   return total;
 }
@@ -302,9 +305,14 @@ async function precheckDiskSpace(dir, payload) {
 }
 /** 直接下载（弹幕/字幕等非媒体文件）：带 UA/Referer、禁用压缩，不经分片下载器，
  *  规避 Range/probe/压缩限制导致的失败 */
-function directDownload(url, dest) {
+function directDownload(url, dest, depth) {
+  depth = depth || 0;
   return new Promise((resolve, reject) => {
-    const u = new URL(url);
+    if (depth > 5) return reject(new Error('重定向次数过多'));
+    // 只允许 B 站 API / 媒体白名单域名，避免渲染层传入任意地址导致 SSRF 或重定向到任意主机
+    let safeUrl;
+    try { safeUrl = security.validateUrl(url, 'media').href; } catch (e) { return reject(e); }
+    const u = new URL(safeUrl);
     const mod = u.protocol === 'http:' ? require('http') : require('https');
     const req = mod.request({
       hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, method: 'GET',
@@ -312,7 +320,7 @@ function directDownload(url, dest) {
     }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.destroy();
-        return directDownload(new URL(res.headers.location, url).href, dest).then(resolve, reject);
+        return directDownload(new URL(res.headers.location, safeUrl).href, dest, depth + 1).then(resolve, reject);
       }
       if (res.statusCode !== 200 && res.statusCode !== 206) {
         res.destroy();
@@ -404,7 +412,7 @@ async function muxDownload(payload) {
     const isMp4 = path.extname(outPath).toLowerCase() === '.mp4';
     const ext = path.extname(outPath);
     const staged = path.join(tmpDir, 'output' + ext);
-    const onMerge = fraction => sendProgress('bili:mux-progress', { token, frac: .9 + fraction * .1, stage: '正在合并音视频', phase: 'merging' }, control);
+    const onMerge = fraction => sendProgress('bili:mux-progress', { token, frac: .9 + fraction * .1, stage: '正在合并音视频', phase: 'merging' });
     if (!start && !end) {
       // 无片段：视频流 + 音频流一步无损合并
       let args = ['-y', '-i', video];
@@ -497,7 +505,7 @@ function registerIpc() {
   });
 
   /* ---- 用系统默认浏览器打开外部链接（开源仓库等） ---- */
-  ipcMain.handle('bili:open-external', function (event, url) {
+  ipcHandle('bili:open-external', function (event, url) {
     if (!/^https?:\/\//i.test(String(url || ''))) return { ok: false };
     try {
       shell.openExternal(url);

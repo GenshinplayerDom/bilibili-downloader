@@ -60,3 +60,36 @@ test('proxy requires authentication and rejects cross-origin or unrelated target
   const post = await fetch(base + '/login-cookies', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ cookies: { SESSDATA: 'FAKE_TEST_TOKEN', DedeUserID: '0' } }) });
   assert.equal(post.status, 200); assert.equal(proxy.getUserLoginInfo().logged, true);
 });
+
+test('web pairing binds the token to the approved origin and blocks framing', async t => {
+  const origin = 'https://demo-user.github.io';
+  const server = http.createServer(proxy.handleRequest); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const base = 'http://127.0.0.1:' + server.address().port;
+
+  // 授权页不可被第三方站点 iframe 嵌套（防点击劫持）
+  const pairPage = await fetch(base + '/pair');
+  assert.equal(pairPage.headers.get('x-frame-options'), 'DENY');
+  assert.match(pairPage.headers.get('content-security-policy') || '', /frame-ancestors 'none'/);
+
+  // 未授权前拿不到 token
+  assert.equal((await fetch(base + '/web-token', { headers: { Origin: origin } })).status, 403);
+
+  // 本机授权页提交（无 Origin → 本机直连允许），并绑定来源
+  const approve = await fetch(base + '/authorize-web', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ allow: true, origin })
+  });
+  assert.equal(approve.status, 200);
+
+  // 绑定来源可取到 token
+  const ok = await fetch(base + '/web-token', { headers: { Origin: origin } });
+  assert.equal(ok.status, 200); assert.equal((await ok.json()).token, proxy.getAccessToken());
+
+  // 同后缀但不同来源的站点不得复用授权
+  const other = await fetch(base + '/web-token', { headers: { Origin: 'https://attacker.github.io' } });
+  assert.equal(other.status, 403);
+
+  // 清理授权状态，避免影响后续用例
+  await fetch(base + '/authorize-web', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ allow: false }) });
+});

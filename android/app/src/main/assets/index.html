@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; connect-src 'self' https: http://127.0.0.1:* http://127.0.0.2:* http://127.0.0.3:* http://localhost:*; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data: blob:; connect-src 'self' https: http://127.0.0.1:* http://127.0.0.2:* http://127.0.0.3:* http://localhost:*; media-src 'self' blob: http: https:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>哔哩下载器 · GenshinplayerDom</title>
 <link rel="stylesheet" href="styles.css">
@@ -15,10 +15,11 @@
 <header class="site-header">
   <div class="logo">▶</div>
   <div class="header-text">
-    <h1>哔哩下载器</h1>
-    <p>粘贴 B 站链接，一键下载视频 / 音频</p>
+    <h1 id="app-title" data-i18n="appTitle">哔哩下载器</h1>
+    <p data-i18n="subTitle">粘贴 B 站链接，一键下载视频 / 音频</p>
   </div>
   <div class="header-right">
+    <button type="button" class="home-btn" id="home-btn" data-i18n="home" title="返回主菜单（保留本次下载历史）">🏠 主菜单</button>
     <span class="login-badge" id="login-badge">未登录</span>
     <span class="mini-status" id="mini-status" title="代理状态">
       <i class="proxy-dot" id="proxy-dot"></i><span id="proxy-state">检测中…</span>
@@ -30,15 +31,16 @@
 
   <!-- UI 模式切换（精简版 / 完全版） -->
   <div class="ui-switch" id="ui-switch" title="切换界面模式">
-    <button type="button" class="ui-switch-btn" data-mode="lite">精简版（老版 UI）</button>
-    <button type="button" class="ui-switch-btn active" data-mode="full">完全版（当前）</button>
+    <button type="button" class="ui-switch-btn" data-mode="lite" data-i18n="lite">精简版</button>
+    <button type="button" class="ui-switch-btn active" data-mode="full" data-i18n="full">完全版</button>
   </div>
 
   <!-- 主操作区（中间偏上） -->
   <section class="card finder-card">
     <div class="input-wrap" id="finder">
-      <input type="text" id="url-input" placeholder="https://www.bilibili.com/video/BV1xx411c7mD 或直接粘贴 BV 号" autocomplete="off" spellcheck="false">
-      <button type="button" id="clear-btn" hidden>清空</button>
+      <input type="text" id="url-input" placeholder="粘贴 B 站链接 / BV 号，或输入关键词直接搜索" autocomplete="off" spellcheck="false">
+      <button type="button" id="search-btn" data-i18n="search" title="按关键词搜索（输入框内容非链接时）">🔍 搜索</button>
+      <button type="button" id="clear-btn" data-i18n="clear" hidden>清空</button>
     </div>
     <div class="finder-status" id="finder-status"></div>
   </section>
@@ -48,14 +50,16 @@
     <div class="video-card">
       <div class="cover-wrap">
         <img id="v-cover" alt="封面">
+        <button type="button" class="cover-play-btn" id="cover-play-btn" title="在线播放（默认 1080P，未登录自动 720P）">▶</button>
       </div>
       <div class="video-meta">
         <div class="v-title" id="v-title"></div>
         <div class="v-up" id="v-up"></div>
-        <div class="v-stats lite-hide">
+        <div class="v-stats">
           <span>▶ <b id="v-views">0</b> 播放</span>
           <span>💬 <b id="v-danmaku">0</b> 弹幕</span>
           <span>👍 <b id="v-likes">0</b> 点赞</span>
+          <span>💬 <b id="v-reply">0</b> 评论</span>
           <span>⏱ <b id="v-duration">0:00</b></span>
         </div>
       </div>
@@ -75,16 +79,23 @@
       </div>
 
       <div class="opt-row" id="opt-video">
-        <label>清晰度</label>
+        <label data-i18n="quality">清晰度</label>
         <select id="qn-select"></select>
       </div>
       <div class="opt-row lite-hide" id="opt-enc">
-        <label>编码</label>
+        <label data-i18n="codec">编码</label>
         <select id="enc-select">
           <option value="auto" selected>自动（兼容优先 · 推荐）</option>
           <option value="h264">H.264（最兼容）</option>
           <option value="h265">H.265（高压缩）</option>
           <option value="av1">AV1（最高压缩）</option>
+        </select>
+      </div>
+      <div class="opt-row lite-hide" id="opt-format">
+        <label data-i18n="format">封装</label>
+        <select id="fmt-select">
+          <option value="mp4" selected>MP4（通用兼容）</option>
+          <option value="mkv">MKV（保留全部音轨/字幕）</option>
         </select>
       </div>
       <div class="opt-row" id="opt-audio" hidden>
@@ -103,7 +114,7 @@
         </select>
       </div>
       <div class="opt-row" id="opt-thread">
-        <label>线程数</label>
+        <label data-i18n="threads">线程数</label>
         <select id="thread-select">
           <option value="4">4 线程（保守）</option>
           <option value="6">6 线程</option>
@@ -115,18 +126,18 @@
         </select>
       </div>
       <div class="opt-row lite-hide" id="opt-clip">
-        <label>片段</label>
+        <label data-i18n="clip">片段</label>
         <input type="text" id="clip-input" placeholder="可选：起始-结束，如 00:30-01:15（秒 / 分:秒）">
       </div>
       <div class="opt-row lite-hide" id="opt-timer">
-        <label>定时</label>
+        <label data-i18n="timer">定时</label>
         <span class="opt-inline">
           <input type="time" id="timer-input" value="">
           <label class="checkbox-label"><input type="checkbox" id="timer-check"> 定时开始</label>
         </span>
       </div>
       <div class="opt-row lite-hide" id="opt-extra">
-        <label>附带</label>
+        <label data-i18n="extras">附带</label>
         <span class="opt-inline">
           <label class="checkbox-label"><input type="checkbox" id="extra-danmaku"> 弹幕 XML</label>
           <label class="checkbox-label"><input type="checkbox" id="extra-sub"> 字幕 SRT</label>
@@ -136,6 +147,7 @@
       <div class="opt-row" id="opt-actions">
         <button type="button" class="mini-btn" id="btn-all" hidden>下载全部 P / 集</button>
         <button type="button" class="mini-btn lite-hide" id="btn-export" title="导出视频信息 / 封面 / 摘要到下载目录">导出信息</button>
+        <button type="button" class="mini-btn" id="play-online-btn" title="在线播放（默认 1080P，未登录自动 720P）">▶ 在线播放</button>
       </div>
 
       <button type="button" class="dl-btn" id="dl-btn">
@@ -146,18 +158,26 @@
     </div>
   </section>
 
-  <!-- 下载任务（支持同时下载多个视频 / 音频，本次使用期间保留记录） -->
-  <section class="card tasks-card" id="tasks-card" hidden>
-    <div class="tasks-title">下载任务 <span class="tasks-sub">本次使用期间保留</span>
-      <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
-    </div>
-    <div class="tasks-list" id="tasks-list"></div>
-  </section>
-
 </main>
+
+<!-- 下载任务（独立于主界面，覆盖面板打开时仍可见） -->
+<section class="card tasks-card" id="tasks-card" hidden>
+  <div class="tasks-title">
+    <button type="button" class="icon-btn task-min" id="task-min-btn" title="最小化为小球">×</button>
+    下载任务 <span class="tasks-sub">本次使用期间保留</span>
+    <button type="button" class="mini-btn" id="tasks-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
+    <button type="button" class="mini-btn" id="tasks-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
+    <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
+    <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
+  </div>
+  <div class="tasks-list" id="tasks-list"></div>
+</section>
 
 <!-- 左下角竖向操作栏（记录 + 设置） -->
 <div class="left-rail">
+  <button type="button" class="rail-btn theme-toggle" id="theme-toggle-btn" title="切换外观（浅色 / 深色）">☀️</button>
+  <button type="button" class="rail-btn alt" id="rail-home-btn" title="主菜单（返回初始主界面，保留下载任务）">🏠</button>
+  <button type="button" class="rail-btn alt" id="queue-btn" title="下载队列">📥</button>
   <button type="button" class="rail-btn" id="history-btn" title="下载记录">🕘</button>
   <button type="button" class="rail-btn" id="settings-btn" title="设置">⚙</button>
 </div>
@@ -176,11 +196,27 @@
   <div class="history-empty" id="history-empty" hidden>暂无下载记录</div>
 </section>
 
+<!-- 下载队列页（替换主界面，布局参考悬浮窗） -->
+<section class="queue-panel" id="queue-panel" hidden>
+  <div class="queue-head">
+    <h2>下载队列</h2>
+    <div class="queue-head-actions">
+      <button type="button" class="mini-btn" id="queue-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
+      <button type="button" class="mini-btn" id="queue-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
+      <button type="button" class="mini-btn danger" id="queue-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
+      <button type="button" class="icon-btn" id="queue-back" title="返回上一级">←</button>
+    </div>
+  </div>
+  <div class="queue-sub">当前下载任务（本次使用期间保留，可取消）</div>
+  <div class="queue-list" id="queue-list"></div>
+</section>
+
 <!-- 批量下载页（替换主界面） -->
 <section class="batch-panel" id="batch-panel" hidden>
   <div class="batch-head">
     <h2>批量下载</h2>
     <div class="batch-head-actions">
+      <button type="button" class="mini-btn danger" id="batch-cancel-all" title="一键中断 / 取消所有下载任务">中断 / 取消全部</button>
       <button type="button" class="mini-btn primary" id="batch-start" title="按下方选项顺序下载全部任务">开始批量下载</button>
       <button type="button" class="icon-btn" id="batch-back" title="返回">←</button>
     </div>
@@ -195,16 +231,23 @@
       </div>
     </div>
     <div class="opt-row" id="batch-opt-video">
-      <label>清晰度</label>
+      <label data-i18n="quality">清晰度</label>
       <select id="batch-qn"></select>
     </div>
     <div class="opt-row lite-hide" id="batch-opt-enc">
-      <label>编码</label>
+      <label data-i18n="codec">编码</label>
       <select id="batch-enc">
         <option value="auto" selected>自动（兼容优先）</option>
         <option value="h264">H.264（最兼容）</option>
         <option value="h265">H.265（高压缩）</option>
         <option value="av1">AV1（最高压缩）</option>
+      </select>
+    </div>
+    <div class="opt-row lite-hide" id="batch-opt-format">
+      <label data-i18n="format">封装</label>
+      <select id="batch-fmt">
+        <option value="mp4" selected>MP4（通用兼容）</option>
+        <option value="mkv">MKV（保留全部音轨/字幕）</option>
       </select>
     </div>
     <div class="opt-row" id="batch-opt-audio" hidden>
@@ -223,7 +266,7 @@
       </select>
     </div>
     <div class="opt-row">
-      <label>线程数</label>
+      <label data-i18n="threads">线程数</label>
       <select id="batch-thread">
         <option value="4">4 线程（保守）</option>
         <option value="6">6 线程</option>
@@ -238,10 +281,105 @@
   <div class="batch-list" id="batch-list"></div>
 </section>
 
+<!-- 合集 / 收藏夹视频列表（表格勾选下载，替换主界面） -->
+<section class="list-panel" id="list-panel" hidden>
+  <div class="list-head">
+    <h2 id="list-title">视频列表</h2>
+    <div class="list-head-actions">
+      <button type="button" class="mini-btn danger" id="list-cancel-all" title="一键中断 / 取消所有下载任务">中断 / 取消全部</button>
+      <button type="button" class="icon-btn" id="list-back" title="返回上一级">←</button>
+    </div>
+  </div>
+  <div class="list-sub" id="list-sub"></div>
+  <div class="list-toolbar">
+    <div class="type-seg" id="list-type-seg" role="tablist">
+      <button type="button" class="seg-btn active" data-type="video" aria-selected="true">视频</button>
+      <button type="button" class="seg-btn" data-type="audio" aria-selected="false">音频</button>
+    </div>
+    <span class="list-toolbar-spacer"></span>
+    <button type="button" class="mini-btn" id="list-check-all">全选</button>
+    <button type="button" class="mini-btn" id="list-uncheck-all">全不选</button>
+    <button type="button" class="mini-btn primary" id="list-dl-selected" disabled>一键下载勾选（0）</button>
+  </div>
+  <div class="list-options">
+    <div class="opt-row" id="list-opt-video">
+      <label data-i18n="quality">清晰度</label>
+      <select id="list-qn"></select>
+    </div>
+    <div class="opt-row lite-hide" id="list-opt-enc">
+      <label data-i18n="codec">编码</label>
+      <select id="list-enc">
+        <option value="auto" selected>自动（兼容优先）</option>
+        <option value="h264">H.264（最兼容）</option>
+        <option value="h265">H.265（高压缩）</option>
+        <option value="av1">AV1（最高压缩）</option>
+      </select>
+    </div>
+    <div class="opt-row lite-hide" id="list-opt-format">
+      <label data-i18n="format">封装</label>
+      <select id="list-fmt">
+        <option value="mp4" selected>MP4（通用兼容）</option>
+        <option value="mkv">MKV（保留全部音轨/字幕）</option>
+      </select>
+    </div>
+    <div class="opt-row" id="list-opt-audio" hidden>
+      <label>格式</label>
+      <select id="list-af">
+        <option value="m4a" selected>M4A（原版无损）</option>
+        <option value="mp3">MP3（转码）</option>
+      </select>
+    </div>
+    <div class="opt-row" id="list-opt-aq" hidden>
+      <label>MP3 音质</label>
+      <select id="list-aq">
+        <option value="128">128 Kbps（良）</option>
+        <option value="192" selected>192 Kbps（优）</option>
+        <option value="320">320 Kbps（极优）</option>
+      </select>
+    </div>
+    <div class="opt-row">
+      <label data-i18n="threads">线程数</label>
+      <select id="list-thread">
+        <option value="4">4 线程（保守）</option>
+        <option value="6">6 线程</option>
+        <option value="8" selected>8 线程（推荐）</option>
+        <option value="10">10 线程</option>
+        <option value="12">12 线程（极速）</option>
+        <option value="14">14 线程</option>
+        <option value="16">16 线程（最大并发）</option>
+      </select>
+    </div>
+  </div>
+  <div class="list-table-wrap">
+    <table class="list-table" id="list-table">
+      <thead>
+        <tr>
+          <th class="col-check"></th>
+          <th class="col-cover"></th>
+          <th class="col-title" data-i18n="thTitle">标题</th>
+          <th class="col-play">播放量</th>
+          <th class="col-danmaku" data-i18n="thDanmaku">弹幕</th>
+          <th class="col-dur">时长</th>
+        </tr>
+      </thead>
+      <tbody id="list-tbody"></tbody>
+    </table>
+  </div>
+  <div class="list-pager" id="list-pager" hidden>
+    <button type="button" class="mini-btn" id="pager-prev">‹ 上一页</button>
+    <span class="pager-pages" id="pager-pages"></span>
+    <button type="button" class="mini-btn" id="pager-next">下一页 ›</button>
+    <span class="pager-jump">跳至 <input type="number" id="pager-input" min="1" value="1"> 页
+      <button type="button" class="mini-btn" id="pager-go">GO</button>
+    </span>
+  </div>
+  <div class="list-empty" id="list-empty" hidden>暂无可下载的视频</div>
+</section>
+
 <!-- 左侧竖向设置侧边栏 -->
 <aside class="settings-panel" id="settings-panel" hidden>
   <div class="settings-head">
-    <h2>设置</h2>
+    <h2 data-i18n="settings">设置</h2>
     <button type="button" class="icon-btn" id="settings-close" title="关闭">✕</button>
   </div>
 
@@ -310,17 +448,34 @@
         <label class="checkbox-label"><input type="checkbox" id="cache-lock"> 锁定下载地址缓存（永不过期）</label>
       </div>
       <div class="set-row">
+        <span class="set-label">搜索每页数量</span>
+        <select id="search-page-size" style="width:130px">
+          <option value="20">20 个 / 页</option>
+          <option value="30" selected>30 个 / 页（默认）</option>
+          <option value="50">50 个 / 页</option>
+          <option value="100">100 个 / 页</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <span class="set-label">同时下载数上限</span>
+        <select id="max-concurrent" style="width:130px">
+          <option value="1">1（最保守）</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4（小内存推荐）</option>
+          <option value="6">6</option>
+          <option value="8" selected>8（默认 · 推荐）</option>
+          <option value="10">10</option>
+          <option value="12">12（大内存）</option>
+          <option value="16">16（超大内存）</option>
+        </select>
+      </div>
+      <div class="set-note" id="conc-note">同时最多进行 N 项下载，其余任务自动排队等待，避免内存溢出。</div>
+      <div class="set-row">
         <span class="set-label">界面语言</span>
         <select id="lang-select" style="width:130px">
           <option value="zh" selected>中文</option>
           <option value="en">English</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <span class="set-label">外观</span>
-        <select id="theme-select" style="width:130px">
-          <option value="light" selected>浅色</option>
-          <option value="dark">深色</option>
         </select>
       </div>
       <div class="set-row">
@@ -358,9 +513,17 @@
       <div class="set-note">首次下载自动获取直链并缓存（约 6 小时有效），后续下载自动复用，无需重复请求接口。</div>
     </section>
 
+    <!-- 网络重置 -->
+    <section class="set-section">
+      <h3>网络重置 <span class="set-hint">（被 B 站临时拉黑 / 清晰度降级时使用）</span></h3>
+      <div class="set-note">固定网络中短时间向 bilibili.com 发送大量数据流，可能被哔哩哔哩临时拉黑，导致视频只能获取低清晰度或下载速度骤降。点击下方按钮将自动执行：刷新 DNS 缓存 → 释放并重新获取 IP → 重置 Winsock → 重置 IP 堆栈（需管理员授权，会短暂断网）。重置完成后请重启电脑并重新打开本软件。</div>
+      <button type="button" class="set-btn primary" id="net-reset-btn">🔄 一键重置网络</button>
+      <div class="fix-logs" id="net-reset-logs" hidden></div>
+    </section>
+
     <!-- 使用教程 -->
     <section class="set-section">
-      <h3>使用教程</h3>
+      <h3 data-i18n="tutorial">使用教程</h3>
       <ol class="tutorial">
         <li><b>提取</b>：粘贴 B 站视频链接 / BV 号 / av 号 / 番剧链接，自动识别并显示视频信息。</li>
         <li><b>下载视频</b>：选择清晰度与线程数，点击「下载」。未登录通常仅 360P~480P，登录后可解锁更高清晰度。</li>
@@ -368,7 +531,23 @@
         <li><b>多任务</b>：可同时下载多个视频 / 音频，每个任务独立进度；任务在本次使用期间保留，可打开 / 定位 / 删除文件；左下角「🕘」查看历史下载记录。</li>
         <li><b>登录</b>：Windows 客户端版点击「登录哔哩哔哩」在应用内扫码登录；Android / 网页版粘贴 Cookie（含 SESSDATA）。</li>
         <li><b>代理异常</b>：确认左上角代理状态为绿色；异常时点击「一键修复」。Android 版代理内置于应用，无需额外操作。</li>
+        <li><b>网络被限速 / 清晰度降级</b>：固定网络中短时间向 bilibili.com 发送大量数据流，可能被哔哩哔哩临时拉黑（表现为视频只能获取低清晰度、下载速度骤降）。可在下方「网络重置」一键重置网络（刷新 DNS、释放/重新获取 IP、重置 Winsock 与 IP 堆栈），或切换网络后重启软件即可恢复。</li>
+        <li><b>在线播放</b>：视频详情页「返回列表」旁或封面播放三角可在线播放，默认 1080P（未登录自动 720P）。如遇无法播放，优先尝试网络重置后重试。</li>
       </ol>
+    </section>
+
+    <!-- 版本更新 -->
+    <section class="set-section" id="update-section">
+      <h3 data-i18n="update">版本与更新</h3>
+      <div class="set-row">
+        <span class="set-label">当前版本</span>
+        <span class="set-value" id="app-version">v1.5.0</span>
+      </div>
+      <div class="set-row">
+        <span class="set-label">更新检查</span>
+        <button type="button" class="set-link" id="check-update-btn">检查更新</button>
+      </div>
+      <div class="set-note" id="update-info">启动时自动检查 GitHub Releases 新版本；有新版本时会提示前往下载。</div>
     </section>
 
     <!-- 开源信息 -->
@@ -389,12 +568,41 @@
       <div class="set-note">本项目基于 MIT 协议开源，可自由使用、修改与分发，请保留署名「GenshinplayerDom」并遵循协议条款。点击上方仓库地址可在浏览器中打开 GitHub 源码页。</div>
     </section>
 
+    <!-- 支持作者 -->
+    <section class="set-section">
+      <h3 data-i18n="support">支持作者</h3>
+      <div class="set-note">本软件完全免费开源。如果您觉得好用，可以请作者喝杯奶茶，您的支持便是我最大的动力 ❤</div>
+      <button type="button" class="set-btn primary" id="support-btn">❤ 支持作者</button>
+    </section>
+
     <!-- 署名 -->
     <div class="app-credit">Made by <b>GenshinplayerDom</b></div>
 
   </div>
 </aside>
 <div class="settings-mask" id="settings-mask" hidden></div>
+
+<!-- 支持作者弹窗 -->
+<div class="player-modal" id="support-modal" hidden>
+  <div class="player-box support-box">
+    <div class="player-head">
+      <span id="support-title">❤ 支持作者</span>
+      <button type="button" class="icon-btn" id="support-close" title="关闭">✕</button>
+    </div>
+    <div class="support-body">
+      <p class="support-msg">您的支持，便是我最大的动力</p>
+      <div class="support-tabs">
+        <button type="button" class="support-tab active" data-pay="wechat">微信支付</button>
+        <button type="button" class="support-tab" data-pay="alipay">支付宝</button>
+      </div>
+      <div class="support-qr">
+        <img id="qr-wechat" src="assets/qr-wechat.png" alt="微信收款码">
+        <img id="qr-alipay" src="assets/qr-alipay.jpg" alt="支付宝收款码" hidden>
+      </div>
+      <p class="support-note">扫码打赏，感谢支持开源 ❤</p>
+    </div>
+  </div>
+</div>
 
 <!-- 播放器预览（功能13） -->
 <div class="player-modal" id="player-modal" hidden>
