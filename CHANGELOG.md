@@ -12,6 +12,9 @@
 - 前端代理提示里的自定义代理地址做协议校验 + 属性转义，修复设置被导入篡改时的 DOM XSS。
 - `/authorize-web` 补 CSRF 防护：`/pair` 每次渲染生成一次性 nonce，授权必须回传；同时校验请求必须同源且为 `application/json`。此前任意网站可用 no-cors 的 `text/plain` POST 静默替用户「授权」，再以自身 Origin 领走代理 token。
 - 登录 Cookie 落盘收紧为 `0600`（目录 `0700`），同机其他用户无法读取密文文件。
+- `/web-token` 不再放行 `Origin: null`：任意网页嵌一个 `sandbox` iframe 即可伪造该来源，配合未绑定来源的授权就能领走 token。本机脚本走无 Origin 的直连即可。
+- 授权未绑定来源时（配对链接未带 `?origin=`，桌面端 `file://` 页面即属此类），在首次领取 token 时把来源钉死，后续其他站点必须重新配对。
+- 续传目录做白名单校验（`assertResumeDir`）：只接受下载目录下、由本程序生成的 `.bili-parts-*` 目录。此前渲染进程可传入任意路径，下载失败时的清理会 `rm -rf` 该目录。
 
 ## 修复
 
@@ -31,6 +34,7 @@
 - `scripts/check.cjs` / `scripts/sync-android.cjs` 修正 Android 资产路径（`android/app/src/main/assets`），此前指向不存在的 `哔哩下载器-android-1.3.0/`，导致 `npm run check` 与 `npm run assets:android` 无法运行。
 - 更正 `download()` 返回值断言（`{ size, tempDir }` 对象）。
 - 新增回归测试：授权来源绑定与防嵌套、暂停保留分片、单分片快速路径；补充非 JSON 类型、缺少 nonce、跨站 Origin 三类授权拒绝用例。
+- 新增回归测试：续传目录白名单、`Origin: null` 拒绝、未绑定授权首用钉死。
 - 清理死代码：`floatTo16Slice`（MP3 转码已由 `encodeMp3` 内联实现）、`debounceParse`/`debounceTimer`（解析早已改为回车即时触发）、`closeLoginWin`（登录窗口 `closed` 事件已处理）。
 - 打包产物命名补 `${arch}`：`nsis` / `portable` 的 `artifactName` 此前不含架构，x64 与 ia32 同名互相覆盖。
 - 新增 `scripts/prepare-win-ffmpeg.cjs`：按目标架构准备 `ffmpeg.exe`，修复 Linux 交叉构建时 `extraResources` 取不到二进制、以及 32 位包被塞入 x64 ffmpeg 的问题。

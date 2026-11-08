@@ -508,12 +508,20 @@ function handleRequest(req, res) {
   }
   if (u.pathname === '/web-token') {
     var hostOk2 = /^127\.0\.0\.[123](?::\d+)?$|^localhost(?::\d+)?$/.test(req.headers.host || '') || lanAllowed(req);
-    var webOrigin = origin && /^https:\/\/([a-z0-9-]+\.)?(github\.io|vercel\.app|netlify\.app|pages\.dev|surge\.sh)(:\d+)?$/.test(origin);
-    if (!hostOk2 || !(webOrigin || origin === 'null' || isLoopbackOnly(req))) return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
+    var webOrigin = !!origin && /^https:\/\/([a-z0-9-]+\.)?(github\.io|vercel\.app|netlify\.app|pages\.dev|surge\.sh)(:\d+)?$/.test(origin);
+    // 注意：不得放行 "Origin: null" —— 任意站点嵌一个 sandbox iframe 就能拿到该 origin，
+    // 若再配合「授权未绑定来源」的旧流程，等于把 token 交给了任意网页；本机脚本走无 Origin 的直连即可。
+    if (!hostOk2 || !(webOrigin || isLoopbackOnly(req))) return sendJson(res, 403, { ok: false, error: '不允许的请求来源' });
     if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
     if (!webAuthorized) return sendJson(res, 403, { ok: false, error: '网站端尚未授权，请在本机打开 http://127.0.0.1:' + PORT + '/pair 完成授权' });
     // 已绑定来源时，只向该来源发放 token（防止同后缀的其他站点复用授权）
     if (authorizedOrigin && origin !== authorizedOrigin) return sendJson(res, 403, { ok: false, error: '该来源未被授权，请重新配对' });
+    // 授权未绑定来源时（配对链接没带 ?origin=，桌面端 file:// 页面即属此类），
+    // 在首次领 token 的那一刻把来源钉死：首个合法站点可用，其余站点必须重新配对。
+    if (!authorizedOrigin && webOrigin) {
+      authorizedOrigin = origin;
+      console.log('[授权] 已将网站端来源绑定为首次领取 token 的来源：' + origin);
+    }
     return sendJson(res, 200, { ok: true, token: accessToken, port: PORT });
   }
 

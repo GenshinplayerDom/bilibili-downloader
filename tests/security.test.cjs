@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { once } = require('node:events');
-const { validateUrl, cookieHeaders, safeName, reserveOutput, assertManagedPath } = require('../lib/security');
+const { validateUrl, cookieHeaders, safeName, reserveOutput, assertManagedPath, assertResumeDir } = require('../lib/security');
 const { CookieStore } = require('../lib/cookie-store');
 const proxy = require('../server');
 
@@ -29,6 +29,21 @@ test('names are safe and concurrent reservations never overwrite a file', t => {
   assert.throws(() => assertManagedPath(first, [dir], new Set()), /本程序/);
   assert.equal(assertManagedPath(first, [dir], new Set([first])), fs.realpathSync(first));
   assert.throws(() => assertManagedPath(first, [path.join(dir, 'other')], new Set([first])));
+});
+test('resume dirs are confined to part dirs inside the download root', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-resume-test-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const parts = fs.mkdtempSync(path.join(root, '.bili-parts-video-'));
+  assert.equal(assertResumeDir(parts, root), fs.realpathSync(parts));
+  const decoy = fs.mkdtempSync(path.join(os.tmpdir(), 'unrelated-'));
+  t.after(() => fs.rmSync(decoy, { recursive: true, force: true }));
+  assert.equal(assertResumeDir(decoy, root), null);                       // 目录前缀不符
+  const outside = fs.mkdtempSync(path.join(decoy, '.bili-parts-fake-'));
+  assert.equal(assertResumeDir(outside, root), null);                      // 不在下载目录内
+  assert.equal(assertResumeDir(path.join(root, 'not-exist'), root), null); // 不存在
+  assert.equal(assertResumeDir('relative/dir', root), null);
+  fs.writeFileSync(path.join(root, '.bili-parts-file'), 'x');
+  assert.equal(assertResumeDir(path.join(root, '.bili-parts-file'), root), null); // 不是目录
 });
 test('legacy cookies migrate to encryption; unavailable encryption never writes plaintext', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-cookie-test-'));
@@ -101,6 +116,22 @@ test('web pairing binds the token to the approved origin and blocks framing', as
   // 同后缀但不同来源的站点不得复用授权
   const other = await fetch(base + '/web-token', { headers: { Origin: 'https://attacker.github.io' } });
   assert.equal(other.status, 403);
+
+  // 重新配对且不绑定来源（模拟桌面端 file:// 页面 location.origin === 'null'）
+  const unboundNonce = nonceOf(await (await fetch(base + '/pair')).text());
+  assert.equal((await approve({ allow: true, nonce: unboundNonce })).status, 200);
+
+  // Origin:null（任意站点嵌 sandbox iframe 即可伪造）不得领取 token
+  assert.equal((await fetch(base + '/web-token', { headers: { Origin: 'null' } })).status, 403);
+
+  // 未绑定时首次领取即钉死来源
+  const firstUse = 'https://demo-user.pages.dev';
+  const got = await fetch(base + '/web-token', { headers: { Origin: firstUse } });
+  assert.equal(got.status, 200); assert.equal((await got.json()).token, proxy.getAccessToken());
+  // 另一个未绑定前的"合法域名"站点随后被拒
+  assert.equal((await fetch(base + '/web-token', { headers: { Origin: 'https://other-user.pages.dev' } })).status, 403);
+  // 已钉死的来源仍可反复取
+  assert.equal((await fetch(base + '/web-token', { headers: { Origin: firstUse } })).status, 200);
 
   // 清理授权状态，避免影响后续用例（每次授权都需要重新获取 nonce）
   const freshNonce = nonceOf(await (await fetch(base + '/pair')).text());

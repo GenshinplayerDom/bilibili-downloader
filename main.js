@@ -389,9 +389,9 @@ async function muxDownload(payload) {
     const partOpts = { threads: payload.threads, control, keepPartsOnAbort: payload.persistParts === true,
       onProgress: (...args) => report('v', ...args),
       onTemp: td => sendProgress('bili:mux-progress', { token, tempDir: td, resKey: 'v', stage: '下载中' }) };
-    const jobs = [downloader.download(videoUrls, video, { ...partOpts, resumeDir: resumeDirs[0] || payload.resumeDir || undefined })];
+    const jobs = [downloader.download(videoUrls, video, { ...partOpts, resumeDir: security.assertResumeDir(resumeDirs[0] || payload.resumeDir, getDownloadDir()) || undefined })];
     if (audioUrls.length) jobs.push(downloader.download(audioUrls, audio, {
-      ...partOpts, resumeDir: resumeDirs[1] || undefined,
+      ...partOpts, resumeDir: security.assertResumeDir(resumeDirs[1], getDownloadDir()) || undefined,
       onProgress: (...args) => report('a', ...args),
       onTemp: td => sendProgress('bili:mux-progress', { token, tempDir: td, resKey: 'a', stage: '下载中' })
     }));
@@ -532,7 +532,7 @@ function registerIpc() {
       await downloader.download(payload.urls || [payload.url], dest, {
         threads: payload.threads, control,
         keepPartsOnAbort: payload.persistParts === true,
-        resumeDir: payload.resumeDir || undefined,
+        resumeDir: security.assertResumeDir(payload.resumeDir, getDownloadDir()) || undefined,
         onProgress: (frac, bytes, speed) => sendProgress('bili:stream-progress', { token, frac, speed, stage: '下载中 ' + (frac * 100).toFixed(0) + '%' }),
         onTemp: td => sendProgress('bili:stream-progress', { token, tempDir: td, speed: 0 })
       });
