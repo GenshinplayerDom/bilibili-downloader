@@ -29,6 +29,10 @@
 - `scripts/check.cjs` / `scripts/sync-android.cjs` 修正 Android 资产路径（`android/app/src/main/assets`），此前指向不存在的 `哔哩下载器-android-1.3.0/`，导致 `npm run check` 与 `npm run assets:android` 无法运行。
 - 更正 `download()` 返回值断言（`{ size, tempDir }` 对象）。
 - 新增回归测试：授权来源绑定与防嵌套、暂停保留分片、单分片快速路径。
+- 打包产物命名补 `${arch}`：`nsis` / `portable` 的 `artifactName` 此前不含架构，x64 与 ia32 同名互相覆盖。
+- 新增 `scripts/prepare-win-ffmpeg.cjs`：按目标架构准备 `ffmpeg.exe`，修复 Linux 交叉构建时 `extraResources` 取不到二进制、以及 32 位包被塞入 x64 ffmpeg 的问题。
+- 新增 `scripts/build-win.cjs`（`npm run build:win` / `build:win:32`）：一条命令完成目录包、便携 zip 与 NSIS 安装包；32 位自动切到 Electron 22.3.27（Electron 44 起不再支持 ia32）。
+- `install.nsi` 支持 `-DAPP_ARCH`，按架构切换 `$PROGRAMFILES64` / `$PROGRAMFILES` 与打包目录，输出名带架构。
 
 # 1.7.6
 

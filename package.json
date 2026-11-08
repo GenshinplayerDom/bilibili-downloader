@@ -11,8 +11,11 @@
     "check": "node scripts/check.cjs",
     "smoke": "node scripts/smoke.cjs",
     "assets:android": "node scripts/sync-android.cjs",
-    "dist:win": "npm run check && electron-builder --win",
-    "pack:win": "npm run check && electron-builder --win --dir"
+    "dist:win": "npm run check && node scripts/prepare-win-ffmpeg.cjs x64 && electron-builder --win --publish never",
+    "pack:win": "npm run check && node scripts/prepare-win-ffmpeg.cjs x64 && electron-builder --win --dir",
+    "prepare:win": "node scripts/prepare-win-ffmpeg.cjs",
+    "build:win": "node scripts/build-win.cjs x64",
+    "build:win:32": "node scripts/build-win.cjs ia32"
   },
   "build": {
     "appId": "com.dom.bilidownloader",
@@ -44,10 +47,10 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "哔哩下载器",
-      "artifactName": "BiliDownloader-Setup-${version}.${ext}"
+      "artifactName": "BiliDownloader-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "BiliDownloader-${version}-portable.${ext}"
+      "artifactName": "BiliDownloader-${version}-${arch}-portable.${ext}"
     },
     "extraResources": [
       {

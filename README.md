@@ -78,7 +78,9 @@ npm test
 npm run assets:android
 npm run check
 npm run smoke
-npm run dist:win
+npm run dist:win          # x64 安装包 + 便携包（Windows 本机构建）
+npm run build:win         # 跨平台构建 x64（Linux/macOS 需 wine、makensis、zip）
+npm run build:win:32      # 32 位版（Electron 22.3.27 + 32 位 ffmpeg，输出安装包与便携包）
 ```
 
 Copyright (c) 2026 GenshinplayerDom

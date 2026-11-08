@@ -11,3 +11,6 @@ android/local.properties
 *.jks
 .bili-parts-*/
 .bili-mux-*/
+build-cache/
+*.exe
+*.zip

@@ -5,9 +5,26 @@ Unicode true
 !define APP_VERSION "1.7.7"
 !define APP_ID "BiliDownloader"
 
+; 可通过 makensis -DAPP_ARCH=ia32 覆盖；默认 x64
+!ifndef APP_ARCH
+  !define APP_ARCH "x64"
+!endif
+; 可通过 makensis -DOUT_EXE=xxx 覆盖输出文件名
+!ifndef OUT_EXE
+  !define OUT_EXE "dist/BiliDownloader-Setup-${APP_VERSION}-${APP_ARCH}.exe"
+!endif
+
+!if "${APP_ARCH}" == "x64"
+  !define INSTALL_ROOT "$PROGRAMFILES64"
+  !define UNPACKED_DIR "dist/win-unpacked"
+!else
+  !define INSTALL_ROOT "$PROGRAMFILES"
+  !define UNPACKED_DIR "dist/win-ia32-unpacked"
+!endif
+
 Name "${APP_NAME}"
-OutFile "BiliDownloader-Setup-${APP_VERSION}.exe"
-InstallDir "$PROGRAMFILES64\${APP_NAME}"
+OutFile "${OUT_EXE}"
+InstallDir "${INSTALL_ROOT}\${APP_NAME}"
 InstallDirRegKey HKLM "Software\${APP_ID}" "Install_Dir"
 RequestExecutionLevel admin
 
@@ -29,7 +46,7 @@ RequestExecutionLevel admin
 
 Section "Install"
   SetOutPath "$INSTDIR"
-  File /r "dist/win-unpacked/*.*"
+  File /r "${UNPACKED_DIR}/*.*"
 
   WriteRegStr HKLM "Software\${APP_ID}" "Install_Dir" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "DisplayName" "${APP_NAME}"
