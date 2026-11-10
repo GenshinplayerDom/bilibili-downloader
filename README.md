@@ -19,6 +19,20 @@ B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 W
 
 详细变更见 [ROADMAP.md](ROADMAP.md)，实际完成范围见同文件。
 
+## 下载与安装
+
+最新版本：**[v1.7.7](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.7.7)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
+
+| 文件 | 适用场景 | 大小 |
+| --- | --- | --- |
+| [BiliDownloader-1.7.7-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.7/BiliDownloader-1.7.7-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
+| [BiliDownloader-1.7.7-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.7/BiliDownloader-1.7.7-x64-portable.zip) | 64 位免安装便携版 | 179MB |
+| [BiliDownloader-1.7.7-ia32-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.7/BiliDownloader-1.7.7-ia32-Setup.exe) | 32 位 Windows 安装版 | 117MB |
+| [BiliDownloader-1.7.7-ia32-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.7/BiliDownloader-1.7.7-ia32-portable.zip) | 32 位免安装便携版 | 117MB |
+
+> 32 位版本使用 Electron 22（Chromium 108），功能与 64 位一致但内核较旧，建议 64 位系统优先选 x64。
+> 安装版与便携版都内置 FFmpeg，无需额外安装；便携版解压即用，配置与下载记录仍写在用户目录。
+
 ## 现有功能
 
 视频 / 音频解析和下载、分 P / 番剧 / 合集 / 收藏夹批量下载、编码与清晰度选择、**多线程多端并发下载（4–16 线程）**、**软件内搜索（B 站视频搜索，直接加入下载列表）**、**跨重启断点续传（保留分片，重启后自动继续）**、**自动更新检查**、**快捷键（Ctrl+D 下载、全局粘贴识别链接）**、**主题跟随系统（浅色 / 深色 / 跟随）**、**下载任务悬浮窗（可拖动 + 最小化小球）**、**下载队列页（左下入口）**、**左下主菜单一键返回**、下载历史（含历史记录页与一键清空）、M4A 直存、MP3 转码（音质良 / 优 / 极优）、字幕 / 弹幕附带下载、封面与信息导出、MP4 / MKV 封装（完全版保留视频封装选项）、片段裁剪、定时开始、限速、**简易版 / 完全版界面切换**、**设置模块（代理方式、一键修复、多开、登录账号获取更高清晰度、使用教程、开源声明链接）**、主题和设置导入导出。
@@ -118,6 +132,8 @@ Linux / macOS 使用 `bash ./gradlew :app:assembleDebug`。Wrapper 使用 Gradle
 
 ## 版本历史
 
+- **v1.7.7**：安全加固（代理端口策略、网站端授权绑定来源与 CSRF 防护、`Origin: null` 领取面、续传目录白名单、Cookie 文件权限）、跨重启续传修复、油猴脚本无声视频修复、并发预检与单分片快速落盘、打包架构修复并补齐 32 位产物。
+- **v1.7.6**：网站端代理配对与 token 失效自愈、Android 原生取消下载等迭代。
 - **v1.6.0**：修复批量列表封面（统一 https，兼容协议相对链接）；下载任务悬浮窗可拖动 + 左上角 × 最小化为小球；左下新增下载队列页（实时任务状态 + 回退）；左下新增主菜单一键返回（保留下载任务）。
 - **v1.5.0**：软件内搜索（WBI 签名 + 代理优先）、跨重启断点续传、自动更新检查、快捷键（Ctrl+D / 全局粘贴）、主题跟随系统、Android 原生 DASH 高清合并（MediaMuxer，无需 FFmpeg）。
 - **v1.4.2**：列表点击判定收窄——仅点击「标题」进入单个视频详情；标题左侧（封面 / 勾选列）点击判定为勾选该项。
