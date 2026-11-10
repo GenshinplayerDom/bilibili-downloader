@@ -8,13 +8,17 @@ final class UrlPolicy {
     static boolean api(URL url) { return url.getHost().equals("api.bilibili.com") || url.getHost().equals("passport.bilibili.com"); }
     static URL validate(String value, String kind) throws IOException {
         URL url = new URL(value.startsWith("//") ? "https:" + value : value);
-        if (url.getUserInfo() != null || (url.getPort() != -1 && url.getPort() != 443)) throw new IOException("不允许的地址");
+        if (url.getUserInfo() != null) throw new IOException("不允许的地址");
+        // 端口策略与桌面版一致：media（CDN 直链）可能带随机端口（如 *.edge.mountaintoys.cn:4483），
+        // api / expand 必须走标准 443，避免把代理当成端口探测工具。
+        if (!kind.equals("media") && url.getPort() != -1 && url.getPort() != 443) throw new IOException("不允许的端口");
         if (url.getProtocol().equals("http") && kind.equals("media")) url = new URL("https" + value.substring(4));
         if (!url.getProtocol().equals("https")) throw new IOException("仅支持 HTTPS 地址");
         String host = url.getHost().toLowerCase(java.util.Locale.ROOT);
         boolean allowed = kind.equals("api") ? api(url)
             : kind.equals("expand") ? domain(host, "bilibili.com") || host.equals("b23.tv")
-            : api(url) || domain(host, "bilivideo.com") || domain(host, "bilivideo.cn") || domain(host, "bilivideo.net") || domain(host, "hdslb.com") || domain(host, "biliimg.com");
+            : api(url) || domain(host, "bilivideo.com") || domain(host, "bilivideo.cn") || domain(host, "bilivideo.net")
+                || domain(host, "hdslb.com") || domain(host, "biliimg.com") || domain(host, "mountaintoys.cn") || domain(host, "biliyungic.com");
         if (!allowed) throw new IOException("不允许的目标域名");
         return url;
     }

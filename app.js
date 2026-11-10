@@ -4711,7 +4711,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.7.7';
+  var APP_VERSION = '1.7.8';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -4741,7 +4741,7 @@
             // 网页链接（Release 页）+ 各平台产物直链（点击直接下载，速度更快）
             var relUrl = 'https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/' + encodeURIComponent(rel.tag_name);
             var html = '发现新版本 <b>v' + escHtml(tag) + '</b>：<a href="javascript:void(0)" id="update-go">前往下载（网页）</a>';
-            var assets = (rel.assets || []).filter(function (a) { return a && a.name && /(Setup|win32-x64|Android|apk|zip)$/i.test(a.name); });
+            var assets = (rel.assets || []).filter(function (a) { return a && a.name && /\.(exe|zip|apk)$/i.test(a.name); });
             if (assets.length) {
               html += '<div style="margin-top:6px;font-size:12px;line-height:1.9">直接下载：';
               assets.forEach(function (a, i) {

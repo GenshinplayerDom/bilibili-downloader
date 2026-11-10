@@ -1,3 +1,14 @@
+# 1.7.8
+
+## 修复
+
+- **自动更新面板漏掉安装包**：资源过滤用的是 `(Setup|win32-x64|Android|apk|zip)$`，而实际产物名以 `.exe` 结尾（`BiliDownloader-<版本>-<arch>-Setup.exe`），导致「直接下载」列表只剩便携包。改为按扩展名 `\.(exe|zip|apk)$` 过滤。
+- **Android 与桌面端 URL 策略不一致**：`UrlPolicy` 对所有类型统一要求 443，media（CDN 直链）带随机端口的地址会被判为「不允许的地址」；域名白名单也缺 `mountaintoys.cn` / `biliyungic.com`，Android 端部分直链下载直接失败。现与 `lib/security.js` 对齐：media 放行任意端口，`api` / `expand` 强制 443，并补齐两个 CDN 域名。
+
+## 其他
+
+- Android `versionName` → 1.3.1，`versionCode` → 14。
+
 # 1.7.7
 
 ## 安全
