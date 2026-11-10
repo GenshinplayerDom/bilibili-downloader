@@ -396,6 +396,14 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+/* 上游 Content-Type 可能已带 charset（如 application/json; charset=utf-8），
+ * 直接再拼一次会得到 "…; charset=utf-8; charset=utf-8" 这种非法头。 */
+function contentTypeWithCharset(value) {
+  var ct = String(value || 'application/json').trim();
+  if (/charset=/i.test(ct)) return ct;
+  return ct + '; charset=utf-8';
+}
+
 /* 多 loopback 地址监听：浏览器对同一地址并发连接上限为 6（HTTP/1.1），
  * 分段并发超过 6 线程时会被浏览器排队。这里同时监听 127.0.0.1/.2/.3，
  * 前端分段下载按索引轮换地址，等效把并发上限提升到 3×6=18。 */
@@ -620,7 +628,7 @@ function handleRequest(req, res) {
     return ensureBuvid(false).then(function () {
       return apiForward(q.url);
     }).then(function (r) {
-      res.setHeader('Content-Type', (r.headers['content-type'] || 'application/json') + '; charset=utf-8');
+      res.setHeader('Content-Type', contentTypeWithCharset(r.headers['content-type']));
       if (r.retried) res.setHeader('X-Bili-Retry', '1');
       res.statusCode = r.status;
       res.end(r.body);
@@ -729,6 +737,7 @@ function stop() {
 
 module.exports = {
   getAccessToken: function () { return accessToken; },
+  contentTypeWithCharset: contentTypeWithCharset,
   onCookiesChanged: function (callback) { onCookiesChanged = callback; },
   handleRequest: handleRequest,
   start: start,

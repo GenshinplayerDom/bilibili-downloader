@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
-// @version      1.3.0
+// @version      1.3.1
 // @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
 // @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
@@ -193,8 +193,22 @@
         url = best.baseUrl || best.base_url;
         name = fn + '_' + ((best.bandwidth || 0) / 1000 | 0) + 'k.m4a';
       } else {
-        var durl = d.durl && d.durl[0];
-        if (durl) { url = durl.url || (durl.backup_url && durl.backup_url[0]); name = fn + '_' + (QNS[d.quality] || d.quality) + '.mp4'; }
+        // 部分视频（长视频 / 番剧）的 durl 是多段 MP4，只取第一段会得到被截断的文件
+        var segs = (d.durl || []).map(function (x) { return x.url || (x.backup_url && x.backup_url[0]); }).filter(Boolean);
+        if (segs.length) {
+          url = segs[0];
+          name = fn + '_' + (QNS[d.quality] || d.quality) + '.mp4';
+          if (segs.length > 1) {
+            st('该视频分为 ' + segs.length + ' 段，正在逐段下载（如需单文件请手动拼接）');
+            segs.forEach(function (seg, i) {
+              setTimeout(function () {
+                download(seg, fn + '_' + (QNS[d.quality] || d.quality) + '_p' + (i + 1) + '.mp4');
+              }, i * 1500);
+            });
+            if (typeof GM_notification === 'function') GM_notification({ title: '哔哩下载器', text: '该视频分为 ' + segs.length + ' 段，开始逐段下载', timeout: 3000 });
+            return;
+          }
+        }
         else if (d.dash && d.dash.video && d.dash.video.length) {
           var v = d.dash.video[0];
           url = v.baseUrl || v.base_url;

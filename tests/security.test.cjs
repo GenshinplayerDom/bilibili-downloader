@@ -77,6 +77,13 @@ test('proxy requires authentication and rejects cross-origin or unrelated target
   assert.equal(post.status, 200); assert.equal(proxy.getUserLoginInfo().logged, true);
 });
 
+test('proxy content type never gets a duplicate charset', () => {
+  const f = proxy.contentTypeWithCharset;
+  assert.equal(f(undefined), 'application/json; charset=utf-8');
+  assert.equal(f('application/json'), 'application/json; charset=utf-8');
+  assert.equal(f('application/json; charset=utf-8'), 'application/json; charset=utf-8');
+  assert.equal(f('text/plain; charset=gbk'), 'text/plain; charset=gbk');
+});
 test('web pairing binds the token to the approved origin and blocks framing', async t => {
   const origin = 'https://demo-user.github.io';
   const server = http.createServer(proxy.handleRequest); server.listen(0, '127.0.0.1'); await once(server, 'listening');
