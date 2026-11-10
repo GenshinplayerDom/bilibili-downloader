@@ -1,10 +1,10 @@
 # 哔哩下载器 · GenshinplayerDom
 
-B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.7.9**，作者 GenshinplayerDom，MIT License。
+B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.0**，作者 GenshinplayerDom，MIT License。
 
 > 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 
-- **视频 / 音频解析**：支持普通视频、分 P、番剧、UP 主合集、收藏夹一键识别与解析。
+- **视频 / 音频解析**：支持普通视频、分 P、番剧（`ss` / `ep`，含整季选集）、UP 主合集、收藏夹一键识别与解析；充电专属视频可识别并提示所需权限。
 - **表格列表面板**：合集 / 收藏夹以表格展示（封面、标题、播放量、弹幕、时长），支持勾选 + 全选 / 全不选；单击「标题」进入单个视频下载详情，点标题左侧区域判定为勾选该项，避免误入详情。
 - **并发下载调度**：设置「同时下载数上限」（默认 8，按设备内存给出建议，最高 16 线程），超限任务自动排队显示「等待中」，任务完成后自动补位；支持一键中断 / 取消全部。
 - **批量下载**：番剧 / 分 P / 合集勾选批量加入队列，逐个视频以单视频方式下载保证成功率；批量面板保留完整下载选项（清晰度、编码、封装、音频格式、线程数）。
@@ -21,14 +21,14 @@ B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 W
 
 ## 下载与安装
 
-最新版本：**[v1.7.9](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.7.9)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
+最新版本：**[v1.8.0](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.0)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
 
 | 文件 | 适用场景 | 大小 |
 | --- | --- | --- |
-| [BiliDownloader-1.7.9-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.9/BiliDownloader-1.7.9-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
-| [BiliDownloader-1.7.9-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.9/BiliDownloader-1.7.9-x64-portable.zip) | 64 位免安装便携版 | 179MB |
-| [BiliDownloader-1.7.9-ia32-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.9/BiliDownloader-1.7.9-ia32-Setup.exe) | 32 位 Windows 安装版 | 117MB |
-| [BiliDownloader-1.7.9-ia32-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.7.9/BiliDownloader-1.7.9-ia32-portable.zip) | 32 位免安装便携版 | 117MB |
+| [BiliDownloader-1.8.0-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.0/BiliDownloader-1.8.0-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
+| [BiliDownloader-1.8.0-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.0/BiliDownloader-1.8.0-x64-portable.zip) | 64 位免安装便携版 | 179MB |
+| [BiliDownloader-1.8.0-ia32-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.0/BiliDownloader-1.8.0-ia32-Setup.exe) | 32 位 Windows 安装版 | 117MB |
+| [BiliDownloader-1.8.0-ia32-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.0/BiliDownloader-1.8.0-ia32-portable.zip) | 32 位免安装便携版 | 117MB |
 
 > 32 位版本使用 Electron 22（Chromium 108），功能与 64 位一致但内核较旧，建议 64 位系统优先选 x64。
 > 安装版与便携版都内置 FFmpeg，无需额外安装；便携版解压即用，配置与下载记录仍写在用户目录。
@@ -132,6 +132,7 @@ Linux / macOS 使用 `bash ./gradlew :app:assembleDebug`。Wrapper 使用 Gradle
 
 ## 版本历史
 
+- **v1.8.0**：番剧 / 影视（PGC）真支持——改用 `pgc/view/web/season` 解析、`pgc/player/web/playurl` 取流，`ep` 链接直接定位到对应剧集；充电专属视频给出充电与权限提示。
 - **v1.7.9**：油猴脚本对多段 `durl` 视频改为逐段下载（此前只下第一段，成品被截断且无提示）；代理 `/api` 的 Content-Type 不再重复拼接 `charset`。
 - **v1.7.8**：自动更新面板资源过滤改为按扩展名匹配（此前 `*-Setup.exe` 与 `.apk` 不显示，只能看到便携包）；Android URL 策略与桌面端对齐（media 放行非标准端口，补齐 `mountaintoys.cn` / `biliyungic.com`），修复部分 CDN 直链下载失败。
 - **v1.7.7**：安全加固（代理端口策略、网站端授权绑定来源与 CSRF 防护、`Origin: null` 领取面、续传目录白名单、Cookie 文件权限）、跨重启续传修复、油猴脚本无声视频修复、并发预检与单分片快速落盘、打包架构修复并补齐 32 位产物。

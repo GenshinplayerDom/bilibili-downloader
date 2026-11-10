@@ -460,7 +460,19 @@
   function fixCover(u) {
     return (u || '').replace(/^\/\//, 'https://').replace(/^http:/i, 'https:');
   }
-  function apiGet(url, opts) {
+  /* B 站错误码友好化：充电专属 / 地区限制等直接给用户能看懂的提示 */
+  function biliErrorText(json) {
+    var code = json && json.code;
+    var msg = (json && json.message) || ('接口返回错误 code=' + code);
+    if (code === 87007 || /充电|upower/i.test(msg)) {
+      return '该视频为「充电专属」内容：需要先为该 UP 主充电，并确保当前登录账号具备观看权限后再下载';
+    }
+    if (code === -10403) return '该内容在当前地区不可用（地区限制），请更换网络环境后重试';
+    if (code === -404 || code === 62002) return '该内容不存在或已被下架/删除';
+    return msg;
+  }
+
+  function apiGetRaw(url, opts) {
     var prefer = opts && opts.preferProxy;
     var doDirect = function () {
       return fetch(url, { credentials: 'omit' }).then(function (res) {
@@ -512,12 +524,57 @@
       });
     }
 
-    return p.then(function (json) {
-      if (json.code !== 0) {
-        throw new Error(json.message || ('接口返回错误 code=' + json.code));
-      }
+    return p;
+  }
+
+  function apiGet(url, opts) {
+    return apiGetRaw(url, opts).then(function (json) {
+      if (json.code !== 0) throw new Error(biliErrorText(json));
       return json.data;
     });
+  }
+
+  /* PGC（番剧 / 影视）接口的返回体在 result 字段里，与普通接口的 data 不同 */
+  function apiPgc(url) {
+    return apiGetRaw(url, { preferProxy: true }).then(function (json) {
+      if (json.code !== 0) throw new Error(biliErrorText(json));
+      if (!json.result) throw new Error('番剧接口未返回数据');
+      return json.result;
+    });
+  }
+
+  /* 把 pgc/view/web/season 的返回映射成界面既有的 bangumi 结构 */
+  function mapPgcSeason(result) {
+    var eps = (result && result.episodes) || [];
+    var stat = result.stat || {};
+    return {
+      season_id: result.season_id,
+      season_title: result.season_title,
+      title: result.title || result.season_title || '番剧',
+      pic: fixCover(result.cover),
+      up: result.up_info ? result.up_info.name : '',
+      stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
+      pubdate: 0,
+      episodes: eps.map(function (ep, i) {
+        return {
+          id: ep.ep_id,
+          ep_id: ep.ep_id,
+          aid: ep.aid,
+          bvid: ep.bvid,
+          cid: ep.cid,
+          title: ep.title || ('第 ' + (i + 1) + ' 话'),
+          long_title: ep.long_title || '',
+          pic: fixCover(ep.cover),
+          duration: Number(ep.duration) || 0,   // PGC 返回毫秒
+          badge: ep.badge || '',
+          badge_type: ep.badge_type || 0
+        };
+      })
+    };
+  }
+
+  function pgcSeason(query) {
+    return apiPgc('https://api.bilibili.com/pgc/view/web/season?' + query).then(mapPgcSeason);
   }
 
   function viewByVideo(q) {
@@ -561,10 +618,15 @@
     });
   }
   function viewByEp(epId) {
-    return apiGet('https://api.bilibili.com/x/web-interface/view?ep_id=' + encodeURIComponent(epId));
+    return pgcSeason('ep_id=' + encodeURIComponent(epId)).then(function (season) {
+      var idx = 0;
+      season.episodes.forEach(function (ep, i) { if (String(ep.ep_id) === String(epId)) idx = i; });
+      season.initialIndex = idx;
+      return season;
+    });
   }
   function viewBySeason(ssId) {
-    return apiGet('https://api.bilibili.com/x/web-interface/view?season_id=' + encodeURIComponent(ssId));
+    return pgcSeason('season_id=' + encodeURIComponent(ssId));
   }
 
   /* ---------- 链接解析 ---------- */
@@ -650,13 +712,10 @@
 
     chain.then(function (p) {
       if (!p) throw new Error('短链展开后未识别到视频');
-      if (p.kind === 'season') {
-        setStatus('loading', '正在获取番剧信息…');
-        return viewBySeason(p.ssId).then(function (data) { return { p: p, data: data }; });
-      }
-      if (p.kind === 'bangumi') {
-        setStatus('loading', '正在获取剧集信息…');
-        return viewByEp(p.epId).then(function (data) { return { p: p, data: data }; });
+      if (p.kind === 'season' || p.kind === 'bangumi') {
+        setStatus('loading', p.kind === 'season' ? '正在获取番剧信息…' : '正在获取剧集信息…');
+        var seasonLoad = p.kind === 'season' ? viewBySeason(p.ssId) : viewByEp(p.epId);
+        return seasonLoad.then(function (data) { return { p: p, data: data }; });
       }
       if (p.kind === 'favlist') {
         setStatus('loading', '正在读取收藏夹视频…');
@@ -671,8 +730,8 @@
     }).then(function (res) {
       var data = res.data;
       if (!data) throw new Error('未获取到视频数据');
-      if (res.p.kind === 'season') {
-        renderSeason(data);
+      if (res.p.kind === 'season' || res.p.kind === 'bangumi') {
+        renderSeason(data, res.p.kind === 'bangumi' ? (data.initialIndex || 0) : 0);
       } else if (res.p.kind === 'favlist') {
         renderFavlist(data);
       } else if (res.p.kind === 'collection') {
@@ -692,9 +751,11 @@
           pubdate: data.pubdate || 0,
           pages: (data.pages && data.pages.length) ? data.pages : [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }],
           pageIndex: 0,
-          degraded: !!data.degraded
+          degraded: !!data.degraded,
+          upower: !!(data.is_upower_exclusive || (data.argue_info && data.argue_info.text))
         };
         renderCurrent();
+        if (current.upower) setNote('warn', '该视频为充电专属内容，需先为 UP 主充电且登录账号具备观看权限才能下载');
         // 异步探测服务端可用清晰度（不阻塞信息展示；失败时保持全档可选）
         probeAcceptQuality().then(fillQnOptions);
       }
@@ -710,7 +771,7 @@
     });
   }
 
-  function renderSeason(data) {
+  function renderSeason(data, initialIndex) {
     var episodes = (data && data.episodes) || [];
     if (!episodes.length) throw new Error('未获取到番剧剧集列表');
     current = {
@@ -742,7 +803,7 @@
       chip.addEventListener('click', function () { selectEpisode(i); });
       pagesList.appendChild(chip);
     });
-    selectEpisode(0, true);
+    selectEpisode(Math.max(0, Math.min(Number(initialIndex) || 0, episodes.length - 1)), true);
   }
 
   function selectEpisode(idx, silent) {
@@ -751,7 +812,7 @@
     current.bvid = ep.bvid;
     current.aid = ep.aid;
     current.cid = ep.cid;
-    current.epId = ep.id;
+    current.epId = ep.ep_id || ep.id;
     var chips = pagesList.children;
     for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('active', i === idx);
     if (!silent) setNote('ok', '已切换到第 ' + (idx + 1) + ' 集');
@@ -1649,8 +1710,20 @@
     });
   }
 
+  /* 番剧 / 影视剧集：必须走 pgc/player/web/playurl，普通 x/player/playurl 拿不到正片高清流 */
+  function fetchPgcPlayurl(media, fnval, qn) {
+    var params = { ep_id: media.epId, cid: media.cid, qn: qn, fnval: fnval, fourk: 1 };
+    var q = Object.keys(params).filter(function (k) { return params[k] !== undefined && params[k] !== null && params[k] !== ''; })
+      .map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+    return apiPgc('https://api.bilibili.com/pgc/player/web/playurl?' + q).then(function (result) {
+      if (!result || (!result.durl && !result.dash)) throw new Error('该剧集暂无可下载地址（可能需要 VIP / 大会员权限）');
+      return result;
+    });
+  }
+
   function fetchPlayurl(fnval, qn, source) {
     var media = source || current;
+    if (media && media.epId) return fetchPgcPlayurl(media, fnval, qn || qnSelect.value);
     var params = {
       bvid: media.bvid,
       avid: media.aid,
@@ -4319,7 +4392,7 @@
     if (batchStart) batchStart.disabled = true;
     var list = batchData.list;
     var n = list.length;
-    var snap = { bvid: current.bvid, aid: current.aid, cid: current.cid, pageIndex: current.pageIndex };
+    var snap = { bvid: current.bvid, aid: current.aid, cid: current.cid, epId: current.epId, pageIndex: current.pageIndex };
     var states = list.map(function () { return { status: 'queued' }; });
     renderBatchList(states);
     showToast('⏳ 开始批量下载 ' + n + ' 个任务（顺序执行）', 'warn');
@@ -4342,7 +4415,8 @@
     };
     var next = function () {
       if (i >= n) {
-        current.bvid = snap.bvid; current.aid = snap.aid; current.cid = snap.cid; current.pageIndex = snap.pageIndex;
+        current.bvid = snap.bvid; current.aid = snap.aid; current.cid = snap.cid;
+        current.epId = snap.epId; current.pageIndex = snap.pageIndex;
         batchActive = false;
         if (batchStart) { batchStart.disabled = false; batchStart.textContent = '全部完成，可返回重新下载'; }
         showToast('✅ 批量下载完成（' + n + ' 个任务）', 'ok');
@@ -4354,6 +4428,7 @@
       current.bvid = p.bvid || snap.bvid;
       current.aid = p.aid || snap.aid;
       current.cid = p.cid;
+      current.epId = p.ep_id || p.id || null;   // 番剧剧集需要 ep_id 才能走 PGC 取流
       current.pageIndex = rowIdx;
       var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
       // 合集 API 不返回 cid：先补全（含标题/时长）再开始下载，避免任务启动即失败
@@ -4711,7 +4786,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.7.9';
+  var APP_VERSION = '1.8.0';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

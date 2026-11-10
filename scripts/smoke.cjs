@@ -46,20 +46,44 @@ const { execFileSync } = require('node:child_process');
       };
     }, root);
     const context = application.context();
+    const upstreamUrls = [];
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.protocol === 'file:') return route.continue();
       const upstream = new URL(url.searchParams.get('url') || 'https://api.bilibili.com/');
+      upstreamUrls.push(url.searchParams.get('url') || '');
       let body = { ok: true, login: { logged: false }, identity: {} };
       if (url.pathname === '/api') {
         let data = {};
         if (upstream.pathname.endsWith('/nav')) data = { wbi_img: { img_url: 'https://i0.hdslb.com/' + 'a'.repeat(32) + '.png', sub_url: 'https://i0.hdslb.com/' + 'b'.repeat(32) + '.png' } };
-        if (upstream.pathname.endsWith('/view')) data = {
+        if (upstream.pathname.endsWith('/view') && upstream.searchParams.get('bvid') === 'BV1upower1x7') data = {
+          bvid: 'BV1upower1x7', aid: 7, cid: 70, title: '充电专属测试', pic: '', duration: 10, owner: { name: 'UP' },
+          stat: { view: 1 }, is_upower_exclusive: true, pages: [{ page: 1, cid: 70, part: '正片', duration: 10 }]
+        };
+        else if (upstream.pathname.endsWith('/view')) data = {
           bvid: 'BV1xx411c7mD', aid: 1, cid: 10, title: '下载体验测试', pic: '', duration: 10, owner: { name: '本地测试' }, stat: { view: 10 },
           pages: [{ page: 1, cid: 10, part: '<img src=x onerror="window.injected=true">', duration: 10 }, { page: 2, cid: 20, part: '第二分 P', duration: 10 }]
         };
+        if (upstream.pathname.endsWith('/playurl') && upstream.searchParams.get('cid') === '70') {
+          // 模拟未充电账号取流：错误码 + 服务端文案
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 87007, message: '充电专属视频，请先充电' }) });
+          return;
+        }
         if (upstream.pathname.endsWith('/playurl')) data = { quality: 80, accept_quality: [80, 64, 32], dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } };
-        body = { code: 0, data };
+        if (upstream.pathname.startsWith('/pgc/view/web/season')) {
+          // 番剧季度：3 集，含 ep_id / cid / 毫秒时长
+          body = { code: 0, result: {
+            season_id: 33145, title: '番剧解析测试', season_title: '番剧解析测试', cover: 'https://i0.hdslb.com/cover.jpg',
+            up_info: { name: '测试番组' }, stat: { views: 10, danmakus: 2, likes: 3, reply: 1 },
+            episodes: [1, 2, 3].map(i => ({ ep_id: 318440 + i, aid: 1000 + i, bvid: 'BV1xx411c7m' + i, cid: 2000 + i,
+              title: '第 ' + i + ' 话', long_title: '剧集 ' + i, cover: 'https://i0.hdslb.com/ep' + i + '.jpg', duration: 600000 }))
+          } };
+        } else if (upstream.pathname.startsWith('/pgc/player/web/playurl')) {
+          body = { code: 0, result: { quality: 80, accept_quality: [80], durl: [{ url: 'https://test.bilivideo.com/video', size: 65536, length: 60 }],
+            dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } } };
+        } else {
+          body = { code: 0, data };
+        }
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
@@ -112,10 +136,32 @@ const { execFileSync } = require('node:child_process');
     const merged = await page.evaluate(() => window.biliAPI.muxDownload({ token: 'smoke_mux', videoUrls: ['https://test.bilivideo.com/real-video'], audioUrls: ['https://test.bilivideo.com/real-audio'], filename: 'merged.mp4', threads: 4 }));
     assert.equal(merged.ok, true, merged.error);
     execFileSync(ffmpeg, ['-v', 'error', '-i', merged.path, '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], { stdio: 'pipe', windowsHide: true });
+    // 番剧：ep 链接 → PGC 季度解析 → 选集 → 按 PGC 取流下载
+    await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep318443');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => document.querySelectorAll('.page-chip').length === 3, null, { timeout: 10000 });
+    assert.equal(await page.locator('.page-chip').nth(2).getAttribute('class'), 'page-chip active', '应默认选中链接对应的第 3 集');
+    await page.locator('#type-seg [data-type="video"]').click();
+    // 番剧取流复用上面的真实音视频样本，确保 DASH 合流走真实 FFmpeg 路径
+    await application.evaluate((_, media) => { globalThis.smokeMedia = Object.assign(globalThis.smokeMedia || {}, media); }, { '/video': video, '/audio': audio });
+    await page.locator('#dl-btn').click();
+    const episodeTask = page.locator('.task-card').last();
+    await episodeTask.locator('.task-status.done').waitFor({ timeout: 20000 });
+    assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/season') && u.includes('ep_id=318443')), '应使用 PGC 季度接口解析');
+    assert.ok(upstreamUrls.some(u => u.includes('/pgc/player/web/playurl') && u.includes('ep_id=318443')), '剧集取流必须走 PGC playurl 并带 ep_id');
+    assert.ok(fs.readdirSync(downloads).some(name => name.endsWith('.mp4')), '番剧应落盘为 mp4');
+    // 充电专属：解析后明确提示，取流被拒时给出可理解的失败原因
+    await page.locator('#url-input').fill('BV1upower1x7');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => /充电专属/.test(document.body.innerText), null, { timeout: 10000 });
+    await page.locator('#dl-btn').click();
+    const upowerTask = page.locator('.task-card').last();
+    await upowerTask.locator('.task-status.error').waitFor({ timeout: 15000 });
+    assert.ok(/充电专属/.test(await upowerTask.innerText()), '失败提示应说明是充电专属内容');
     assert.deepEqual(errors, []);
     fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'artifacts/smoke-desktop.png'), fullPage: true });
-    console.log('PASS: Electron launch, safe title rendering, pause/resume, task preservation, collision protection, retry, IPC file protection and real FFmpeg audio/video mux.');
+    console.log('PASS: Electron launch, safe title rendering, pause/resume, task preservation, collision protection, retry, IPC file protection, real FFmpeg audio/video mux, PGC bangumi download and upower-exclusive handling.');
   } catch (error) {
     if (page) { console.error('Page errors:', errors); console.error(await page.locator('body').innerText().catch(() => '')); }
     throw error;

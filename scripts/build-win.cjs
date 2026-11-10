@@ -46,7 +46,14 @@ if (fs.existsSync(path.join(root, 'install.nsi'))) {
   try {
     run('makensis', ['-DAPP_ARCH=' + arch, '-DOUT_EXE=' + setup, 'install.nsi']);
   } catch (e) {
-    console.warn('makensis 不可用，跳过安装包（便携包仍会生成）');
+    // 区分「工具缺失」与「脚本编译失败」：后者必须暴露出来，否则只剩便携包却看不出原因
+    if (e && e.code === 'ENOENT') {
+      console.warn('makensis 未安装（apt-get install -y nsis），本次跳过安装包，仅生成便携包');
+    } else {
+      console.error('makensis 编译 install.nsi 失败：' + (e && e.message ? e.message : e));
+      process.exitCode = 1;
+      throw e;
+    }
   }
 }
 
