@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
-// @version      1.3.1
+// @version      1.3.2
 // @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
 // @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
@@ -121,10 +121,53 @@
     var s = /"bvid":"([^"]+)"/.exec(document.documentElement.innerHTML);
     return s ? s[1] : '';
   }
+  function safeName(v) {
+    return String(v || '').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim().slice(0, 80) || 'untitled';
+  }
   function getTitle() {
     var t = $('h1') || $('.video-info-title') || document.title;
     return (t ? t.textContent.trim() : document.title.replace(/_[^_]*$/, '')).slice(0, 60);
   }
+  /* ---------- 番剧（PGC）---------- */
+  function getEpId() {
+    var m = /\/bangumi\/play\/ep(\d+)/.exec(location.href);
+    if (m) return Number(m[1]);
+    var s = /"ep_id":(\d+)/.exec(document.documentElement.innerHTML);
+    return s ? Number(s[1]) : 0;
+  }
+  function pgcErrorMessage(code, message) {
+    if (code === 87007 || /充电|upower/i.test(message || '')) return '该视频为充电专属内容，需先为该 UP 主充电并登录有权限的账号';
+    if (code === -10403) return '该内容在当前地区不可用（地区限制）';
+    if (code === -404 || code === 62002) return '该内容不存在或已下架';
+    return message || ('番剧接口错误 ' + code);
+  }
+  /* PGC 接口返回体在 result 里，且不需要 WBI 签名 */
+  function apiPgc(path, params) {
+    var q = Object.keys(params || {}).filter(function (k) { return params[k] !== undefined && params[k] !== null && params[k] !== ''; })
+      .map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
+    return new Promise(function (resolve, reject) {
+      fetch(path + (q ? (path.indexOf('?') >= 0 ? '&' : '?') + q : ''), { credentials: 'include' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j.code !== 0) return reject(new Error(pgcErrorMessage(j.code, j.message)));
+          if (!j.result) return reject(new Error('番剧接口未返回数据'));
+          resolve(j.result);
+        })
+        .catch(reject);
+    });
+  }
+  /* 当前番剧页 → { epId, bvid, cid, title } */
+  function resolveBangumi(epId) {
+    return apiPgc('https://api.bilibili.com/pgc/view/web/season', { ep_id: epId }).then(function (season) {
+      var eps = season.episodes || [];
+      var hit = null;
+      eps.forEach(function (e) { if (Number(e.ep_id) === Number(epId)) hit = e; });
+      // 找不到就报错，绝不回落到第 1 集（否则用户会下到与页面无关的内容）
+      if (!hit) throw new Error('未找到该剧集（可能是预告/花絮或已下架）');
+      return { epId: hit.ep_id, bvid: hit.bvid, cid: hit.cid, title: (hit.long_title || hit.title || season.title || '番剧'), seasonTitle: season.title };
+    });
+  }
+
   /* cid 兜底：页面文本里找不到时，用 view 接口取第一分 P 的 cid */
   function resolveCid(bvid, cid) {
     if (cid) return Promise.resolve(cid);
@@ -172,19 +215,34 @@
   }
 
   function doDownload(type) {
+    var epId = getEpId();
     var bvid = getBvid();
-    if (!bvid) { st('未识别到视频（bvid=' + bvid + '）'); return; }
+    if (!bvid && !epId) { st('未识别到视频（bvid=' + bvid + '）'); return; }
     var cid = getCid();
     var qn = Number(box.querySelector('#bd-qn').value);
     // 视频用 fnval=1（传统 durl 合流 MP4，自带音频轨）；fnval=16 是 DASH 分离流，
     // 只下视频轨会得到无声文件（桌面版靠 ffmpeg 合流，油猴版无法合流）。
     var fnval = type === 'audio' ? 4048 : 1;
-    var fn = 'bili_' + bvid + '_' + (type === 'audio' ? 'audio' : QNS[qn] || qn);
     st('获取下载地址…');
-    // 页面 HTML 里抓不到 cid 时，回退到 view 接口取第一分 P 的 cid，避免整段失败
-    resolveCid(bvid, cid).then(function (realCid) {
-      return apiGet('https://api.bilibili.com/x/player/playurl', { bvid: bvid, cid: realCid, qn: qn, fnval: fnval, fourk: 1 });
-    }).then(function (d) {
+    // 番剧页（bangumi/play/ep…）走 PGC 接口；普通视频仍走 x/player/playurl
+    var request;
+    if (epId) {
+      request = resolveBangumi(epId).then(function (info) {
+        bvid = info.bvid;
+        var fn = 'bili_' + safeName(info.seasonTitle || '') + '_' + safeName(info.title) + '_' + (type === 'audio' ? 'audio' : (QNS[qn] || qn));
+        box.dataset.fileName = fn;
+        return apiPgc('https://api.bilibili.com/pgc/player/web/playurl', { ep_id: info.epId, cid: info.cid, qn: qn, fnval: fnval, fourk: 1 });
+      });
+    } else {
+      var fn = 'bili_' + bvid + '_' + (type === 'audio' ? 'audio' : QNS[qn] || qn);
+      box.dataset.fileName = fn;
+      // 页面 HTML 里抓不到 cid 时，回退到 view 接口取第一分 P 的 cid，避免整段失败
+      request = resolveCid(bvid, cid).then(function (realCid) {
+        return apiGet('https://api.bilibili.com/x/player/playurl', { bvid: bvid, cid: realCid, qn: qn, fnval: fnval, fourk: 1 });
+      });
+    }
+    request.then(function (d) {
+      var fn = box.dataset.fileName || ('bili_' + (bvid || 'video'));
       var url = null, name = '', dashOnly = false;
       if (type === 'audio') {
         var audios = (d.dash && d.dash.audio) || [];

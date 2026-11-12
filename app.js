@@ -543,6 +543,23 @@
     });
   }
 
+  function mapPgcEpisode(ep, i) {
+    return {
+      id: ep.ep_id,
+      ep_id: ep.ep_id,
+      aid: ep.aid,
+      bvid: ep.bvid,
+      cid: ep.cid,
+      title: ep.title || ('第 ' + (i + 1) + ' 话'),
+      long_title: ep.long_title || '',
+      pic: fixCover(ep.cover),
+      // PGC 的 duration 是毫秒，界面统一按秒展示
+      duration: Math.round((Number(ep.duration) || 0) / 1000),
+      badge: ep.badge || '',
+      badge_type: ep.badge_type || 0
+    };
+  }
+
   /* 把 pgc/view/web/season 的返回映射成界面既有的 bangumi 结构 */
   function mapPgcSeason(result) {
     var eps = (result && result.episodes) || [];
@@ -555,21 +572,7 @@
       up: result.up_info ? result.up_info.name : '',
       stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
       pubdate: 0,
-      episodes: eps.map(function (ep, i) {
-        return {
-          id: ep.ep_id,
-          ep_id: ep.ep_id,
-          aid: ep.aid,
-          bvid: ep.bvid,
-          cid: ep.cid,
-          title: ep.title || ('第 ' + (i + 1) + ' 话'),
-          long_title: ep.long_title || '',
-          pic: fixCover(ep.cover),
-          duration: Number(ep.duration) || 0,   // PGC 返回毫秒
-          badge: ep.badge || '',
-          badge_type: ep.badge_type || 0
-        };
-      })
+      episodes: eps.map(mapPgcEpisode)
     };
   }
 
@@ -618,10 +621,24 @@
     });
   }
   function viewByEp(epId) {
-    return pgcSeason('ep_id=' + encodeURIComponent(epId)).then(function (season) {
-      var idx = 0;
+    return apiPgc('https://api.bilibili.com/pgc/view/web/season?ep_id=' + encodeURIComponent(epId)).then(function (result) {
+      var season = mapPgcSeason(result);
+      var idx = -1;
       season.episodes.forEach(function (ep, i) { if (String(ep.ep_id) === String(epId)) idx = i; });
-      season.initialIndex = idx;
+      if (idx >= 0) { season.initialIndex = idx; return season; }
+      // 不是正片（PV / 花絮等放在 section 里）：只精确解析这一条，绝不回落到第 1 集
+      var sections = result.section || [];
+      var hit = null;
+      sections.forEach(function (sec) {
+        (sec.episodes || []).forEach(function (ep) {
+          if (!hit && String(ep.ep_id) === String(epId)) hit = { ep: ep, secTitle: sec.title || '' };
+        });
+      });
+      if (!hit) throw new Error('未找到该剧集（可能已下架或不在当前季度）');
+      var only = mapPgcEpisode(hit.ep, 0);
+      only.long_title = (hit.secTitle ? hit.secTitle + ' · ' : '') + (only.long_title || only.title);
+      season.episodes = [only];
+      season.initialIndex = 0;
       return season;
     });
   }
@@ -795,8 +812,11 @@
       var chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'page-chip' + (i === 0 ? ' active' : '');
-      var t = String(ep.title || '');
-      var label = /第.+[话集]/.test(t) ? t : (t ? '第 ' + t + ' 话' : '第 ' + (i + 1) + ' 话');
+      var t = String(ep.title || '').trim();
+      var label;
+      if (/第\s*.+?[话集]/.test(t)) label = t;                    // 第1话 / 第 2 集
+      else if (t && /正片|预告|PV|花絮|访谈|彩蛋|番外|特典|OAD|OVA/i.test(t)) label = t;  // PGC 常见命名
+      else label = t ? ('第 ' + t + ' 话') : ('第 ' + (i + 1) + ' 话');
       if (ep.long_title) label += ' · ' + ep.long_title;
       chip.innerHTML = '<span class="page-part">' + escHtml(label) + '</span>' +
         '<span class="page-dur">' + fmtDur(ep.duration || 0) + '</span>';
@@ -3310,6 +3330,7 @@
     // 通过代理请求 x/player/v2 取字幕地址（可选；失败返回 null）
     if (!current || !current.bvid || !current.cid) return Promise.resolve(null);
     var params = { bvid: current.bvid, cid: current.cid };
+    if (current.epId) params.ep_id = current.epId;   // 番剧字幕要 ep_id 才能按剧集权限返回
     return wbiSign(params).then(function (signed) {
       var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
       return apiGet('https://api.bilibili.com/x/player/v2?' + q).then(function (j) {
@@ -4786,7 +4807,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.0';
+  var APP_VERSION = '1.8.1';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

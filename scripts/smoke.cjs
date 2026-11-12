@@ -141,6 +141,8 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#url-input').press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('.page-chip').length === 3, null, { timeout: 10000 });
     assert.equal(await page.locator('.page-chip').nth(2).getAttribute('class'), 'page-chip active', '应默认选中链接对应的第 3 集');
+    // PGC 的 duration 是毫秒：600000ms 必须显示成 10:00，而不是 166 小时
+    assert.match(await page.locator('.page-chip').first().innerText(), /10:00/, '剧集时长应按秒格式化');
     await page.locator('#type-seg [data-type="video"]').click();
     // 番剧取流复用上面的真实音视频样本，确保 DASH 合流走真实 FFmpeg 路径
     await application.evaluate((_, media) => { globalThis.smokeMedia = Object.assign(globalThis.smokeMedia || {}, media); }, { '/video': video, '/audio': audio });
@@ -150,6 +152,15 @@ const { execFileSync } = require('node:child_process');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/season') && u.includes('ep_id=318443')), '应使用 PGC 季度接口解析');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/player/web/playurl') && u.includes('ep_id=318443')), '剧集取流必须走 PGC playurl 并带 ep_id');
     assert.ok(fs.readdirSync(downloads).some(name => name.endsWith('.mp4')), '番剧应落盘为 mp4');
+    // 整季批量：每集都要带上自己的 ep_id，否则只有第一集会走 PGC 取流
+    const mp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
+    await page.locator('#btn-all').click();
+    await page.locator('#batch-panel').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('#batch-start').click();
+    await page.waitForFunction(() => /批量下载完成/.test(document.body.innerText), null, { timeout: 60000 });
+    assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length >= mp4Before + 3, '整季批量应下载 3 集');
+    assert.equal(new Set(upstreamUrls.filter(u => u.includes('/pgc/player/web/playurl')).map(u => (/ep_id=(\d+)/.exec(u) || [])[1])).size, 3, '三个剧集应分别带自己的 ep_id 取流');
+    await page.locator('#batch-back').click();
     // 充电专属：解析后明确提示，取流被拒时给出可理解的失败原因
     await page.locator('#url-input').fill('BV1upower1x7');
     await page.locator('#url-input').press('Enter');
