@@ -655,6 +655,13 @@
   function viewBySeason(ssId) {
     return pgcSeason('season_id=' + encodeURIComponent(ssId));
   }
+  /* 媒体页（md…）本身不含剧集，先用 media 接口拿 season_id，再取季度数据 */
+  function viewByMedia(mediaId) {
+    return apiPgc('https://api.bilibili.com/pgc/view/web/media?media_id=' + encodeURIComponent(mediaId)).then(function (media) {
+      if (!media || !media.season_id) throw new Error('未找到该作品所属的季度信息');
+      return viewBySeason(String(media.season_id));
+    });
+  }
 
   /* ---------- 链接解析 ---------- */
   function parseLink(text) {
@@ -666,6 +673,9 @@
     if (m) return { kind: 'season', ssId: m[1] };
     m = text.match(/(?:^|[^A-Za-z0-9])ep(\d+)/i);
     if (m) return { kind: 'bangumi', epId: m[1] };
+    // 影视 / 番剧媒体页：/bangumi/media/md22630575（只有 media_id，需先换成 season_id）
+    m = text.match(/bangumi\/media\/md(\d+)/i);
+    if (m) return { kind: 'media', mediaId: m[1] };
     m = text.match(/favlist\?fid=(\d+)/i);
     if (m) return { kind: 'favlist', fid: m[1] };
     m = text.match(/collectiondetail\?sid=(\d+)/i);
@@ -740,9 +750,11 @@
 
     chain.then(function (p) {
       if (!p) throw new Error('短链展开后未识别到视频');
-      if (p.kind === 'season' || p.kind === 'bangumi') {
-        setStatus('loading', p.kind === 'season' ? '正在获取番剧信息…' : '正在获取剧集信息…');
-        var seasonLoad = p.kind === 'season' ? viewBySeason(p.ssId) : viewByEp(p.epId);
+      if (p.kind === 'season' || p.kind === 'bangumi' || p.kind === 'media') {
+        setStatus('loading', p.kind === 'bangumi' ? '正在获取剧集信息…' : '正在获取番剧 / 影视信息…');
+        var seasonLoad = p.kind === 'season' ? viewBySeason(p.ssId)
+          : p.kind === 'bangumi' ? viewByEp(p.epId)
+          : viewByMedia(p.mediaId);
         return seasonLoad.then(function (data) { return { p: p, data: data }; });
       }
       if (p.kind === 'favlist') {
@@ -758,7 +770,7 @@
     }).then(function (res) {
       var data = res.data;
       if (!data) throw new Error('未获取到视频数据');
-      if (res.p.kind === 'season' || res.p.kind === 'bangumi') {
+      if (res.p.kind === 'season' || res.p.kind === 'bangumi' || res.p.kind === 'media') {
         renderSeason(data, res.p.kind === 'bangumi' ? (data.initialIndex || 0) : 0);
       } else if (res.p.kind === 'favlist') {
         renderFavlist(data);
@@ -818,7 +830,7 @@
     };
     current.title = current.title + (data.isMovie && episodes.length === 1 ? '（电影）' : '（' + episodes.length + ' 集）');
     renderCard();
-    if (btnAll) btnAll.hidden = false;
+    if (btnAll) btnAll.hidden = episodes.length < 2;   // 单集电影没有「批量」可言
     pagesPanel.hidden = false;
     pagesList.innerHTML = '';
     episodes.forEach(function (ep, i) {
@@ -4837,7 +4849,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.3';
+  var APP_VERSION = '1.8.4';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

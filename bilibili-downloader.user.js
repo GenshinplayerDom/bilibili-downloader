@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
-// @version      1.3.4
+// @version      1.3.5
 // @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
 // @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
@@ -142,6 +142,17 @@
     var m = /\/bangumi\/play\/ss(\d+)/.exec(location.href);
     return m ? Number(m[1]) : 0;
   }
+  function getMediaId() {
+    var m = /\/bangumi\/media\/md(\d+)/.exec(location.href);
+    return m ? Number(m[1]) : 0;
+  }
+  /* 媒体页（md…）不含剧集，先拿 season_id 再定位第一集 */
+  function resolveMediaFirstEp(mediaId) {
+    return apiPgc('https://api.bilibili.com/pgc/view/web/media', { media_id: mediaId }).then(function (media) {
+      if (!media || !media.season_id) throw new Error('未找到该作品所属的季度');
+      return resolveSeasonFirstEp(media.season_id);
+    });
+  }
   /* ss 页：按季度定位第一集（页面里的 ep_id 可能是推荐位，不可信） */
   function resolveSeasonFirstEp(ssId) {
     return apiPgc('https://api.bilibili.com/pgc/view/web/season', { season_id: ssId }).then(function (season) {
@@ -233,8 +244,9 @@
   function doDownload(type) {
     var epId = getEpId();
     var ssId = getSeasonId();
+    var mdId = getMediaId();
     var bvid = getBvid();
-    if (!bvid && !epId && !ssId) { st('未识别到视频（bvid=' + bvid + '）'); return; }
+    if (!bvid && !epId && !ssId && !mdId) { st('未识别到视频（bvid=' + bvid + '）'); return; }
     var cid = getCid();
     var qn = Number(box.querySelector('#bd-qn').value);
     // 视频用 fnval=1（传统 durl 合流 MP4，自带音频轨）；fnval=16 是 DASH 分离流，
@@ -243,8 +255,9 @@
     st('获取下载地址…');
     // 番剧页（bangumi/play/ep…）走 PGC 接口；普通视频仍走 x/player/playurl
     var request;
-    if (epId || ssId) {
-      request = (epId ? resolveBangumi(epId) : resolveSeasonFirstEp(ssId)).then(function (info) {
+    if (epId || ssId || mdId) {
+      var resolveInfo = epId ? resolveBangumi(epId) : (ssId ? resolveSeasonFirstEp(ssId) : resolveMediaFirstEp(mdId));
+      request = resolveInfo.then(function (info) {
         bvid = info.bvid;
         var fn = 'bili_' + safeName(info.seasonTitle || '') + '_' + safeName(info.title) + '_' + (type === 'audio' ? 'audio' : (QNS[qn] || qn));
         box.dataset.fileName = fn;

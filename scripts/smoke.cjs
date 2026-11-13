@@ -70,7 +70,9 @@ const { execFileSync } = require('node:child_process');
           return;
         }
         if (upstream.pathname.endsWith('/playurl')) data = { quality: 80, accept_quality: [80, 64, 32], dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } };
-        if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('ep_id') === '900001') {
+        if (upstream.pathname.startsWith('/pgc/view/web/media')) {
+          body = { code: 0, result: { media_id: 22630575, season_id: 48412, title: '免费电影测试', type: 2 } };
+        } else if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('ep_id') === '900001') {
           body = { code: 0, result: {
             season_id: 48411, type: 2, title: '电影解析测试', season_title: '电影解析测试', cover: 'https://i0.hdslb.com/m.jpg',
             up_info: { uname: '哔哩哔哩电影' }, actors: '甲\\n乙', stat: { views: 100, danmakus: 5, likes: 7, reply: 1 },
@@ -201,6 +203,17 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#dl-btn').click();
     await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > movieMp4Before, '免费电影应落盘');
+
+    // 媒体页（md…）：不含剧集，需 media → season 两级解析；单集电影不该出现「下载全部」
+    const mdMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
+    await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/media/md22630575');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => /免费电影测试/.test(document.querySelector('#v-title').textContent), null, { timeout: 10000 });
+    assert.equal(await page.locator('#btn-all').isVisible(), false, '单集电影不应显示下载全部');
+    assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/media') && u.includes('media_id=22630575')), '应通过 media 接口解析 md 页');
+    await page.locator('#dl-btn').click();
+    await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
+    assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > mdMp4Before, 'md 页应能正常下载');
 
     // 充电专属：解析后明确提示，取流被拒时给出可理解的失败原因
     await page.locator('#url-input').fill('BV1upower1x7');
