@@ -70,7 +70,20 @@ const { execFileSync } = require('node:child_process');
           return;
         }
         if (upstream.pathname.endsWith('/playurl')) data = { quality: 80, accept_quality: [80, 64, 32], dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } };
-        if (upstream.pathname.startsWith('/pgc/view/web/season')) {
+        if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('ep_id') === '900001') {
+          body = { code: 0, result: {
+            season_id: 48411, type: 2, title: '电影解析测试', season_title: '电影解析测试', cover: 'https://i0.hdslb.com/m.jpg',
+            up_info: { uname: '哔哩哔哩电影' }, actors: '甲\\n乙', stat: { views: 100, danmakus: 5, likes: 7, reply: 1 },
+            rights: { is_preview: 1, only_vip_download: 1 },
+            episodes: [{ ep_id: 900001, aid: 900001, bvid: 'BV1movie1x7', cid: 900001, title: '正片', long_title: '', cover: 'https://i0.hdslb.com/e.jpg', duration: 7182000 }]
+          } };
+        } else if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('ep_id') === '900002') {
+          body = { code: 0, result: {
+            season_id: 48412, type: 2, title: '免费电影测试', season_title: '免费电影测试', cover: 'https://i0.hdslb.com/m2.jpg',
+            up_info: { uname: '哔哩哔哩电影' }, stat: { views: 1 }, rights: { is_preview: 0 },
+            episodes: [{ ep_id: 900002, aid: 900002, bvid: 'BV1movie2x7', cid: 900002, title: '正片', cover: 'https://i0.hdslb.com/e2.jpg', duration: 3600000 }]
+          } };
+        } else if (upstream.pathname.startsWith('/pgc/view/web/season')) {
           // 番剧季度：3 集，含 ep_id / cid / 毫秒时长
           body = { code: 0, result: {
             season_id: 33145, title: '番剧解析测试', season_title: '番剧解析测试', cover: 'https://i0.hdslb.com/cover.jpg',
@@ -78,6 +91,9 @@ const { execFileSync } = require('node:child_process');
             episodes: [1, 2, 3].map(i => ({ ep_id: 318440 + i, aid: 1000 + i, bvid: 'BV1xx411c7m' + i, cid: 2000 + i,
               title: '第 ' + i + ' 话', long_title: '剧集 ' + i, cover: 'https://i0.hdslb.com/ep' + i + '.jpg', duration: 600000 }))
           } };
+        } else if (upstream.pathname.startsWith('/pgc/player/web/playurl') && upstream.searchParams.get('ep_id') === '900001') {
+          // 大会员电影、无权限账号：只给 6 分钟试看
+          body = { code: 0, result: { quality: 32, is_preview: 1, durl: [{ url: 'https://test.bilivideo.com/video', length: 360708, size: 65536 }], accept_quality: [112, 80] } };
         } else if (upstream.pathname.startsWith('/pgc/player/web/playurl')) {
           body = { code: 0, result: { quality: 80, accept_quality: [80], durl: [{ url: 'https://test.bilivideo.com/video', size: 65536, length: 60 }],
             dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } } };
@@ -161,6 +177,28 @@ const { execFileSync } = require('node:child_process');
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length >= mp4Before + 3, '整季批量应下载 3 集');
     assert.equal(new Set(upstreamUrls.filter(u => u.includes('/pgc/player/web/playurl')).map(u => (/ep_id=(\d+)/.exec(u) || [])[1])).size, 3, '三个剧集应分别带自己的 ep_id 取流');
     await page.locator('#batch-back').click();
+    // 电影（大会员）：能读出来，但试看片段必须拒绝保存，不能当完整影片交付
+    await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep900001');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => /电影/.test(document.body.innerText), null, { timeout: 10000 });
+    assert.match(await page.locator('#v-title').innerText(), /（电影）/);
+    assert.equal(await page.locator('#v-up').innerText(), '哔哩哔哩电影', '电影 UP 名应取 up_info.uname');
+    assert.equal(await page.locator('#v-duration').innerText(), '1:59:42', '电影时长应按毫秒换算');
+    const movieMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
+    await page.locator('#dl-btn').click();
+    const movieTask = page.locator('.task-card').last();
+    await movieTask.locator('.task-status.error').waitFor({ timeout: 15000 });
+    assert.match(await movieTask.innerText(), /试看|大会员/, '试看片段应明确拒绝并说明原因');
+    assert.equal(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length, movieMp4Before, '试看片段不得落盘');
+
+    // 电影（免费）：完整读取并保存
+    await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep900002');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => /免费电影测试/.test(document.body.innerText), null, { timeout: 10000 });
+    await page.locator('#dl-btn').click();
+    await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
+    assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > movieMp4Before, '免费电影应落盘');
+
     // 充电专属：解析后明确提示，取流被拒时给出可理解的失败原因
     await page.locator('#url-input').fill('BV1upower1x7');
     await page.locator('#url-input').press('Enter');

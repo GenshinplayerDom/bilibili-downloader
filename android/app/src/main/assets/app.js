@@ -567,9 +567,11 @@
     return {
       season_id: result.season_id,
       season_title: result.season_title,
+      mediaType: result.type,   // 1 = 番剧，2 = 电影
+      isMovie: result.type === 2,
       title: result.title || result.season_title || '番剧',
       pic: fixCover(result.cover),
-      up: result.up_info ? result.up_info.name : '',
+      up: (result.up_info && (result.up_info.uname || result.up_info.name)) || '',
       stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
       pubdate: 0,
       episodes: eps.map(mapPgcEpisode)
@@ -796,14 +798,16 @@
       seasonId: data.season_id,
       title: data.title || data.season_title || '',
       pic: fixCover((episodes[0] && episodes[0].pic) || data.pic),
-      up: data.up_info ? data.up_info.name : '',
+      up: data.up || (data.up_info ? (data.up_info.uname || data.up_info.name) : ''),
+      mediaType: data.mediaType,
+      isMovie: !!data.isMovie,
       duration: (episodes[0] && episodes[0].duration) || 0,
       stat: data.stat || {},
       pubdate: 0,
       episodes: episodes,
       pageIndex: 0
     };
-    current.title = current.title + '（' + episodes.length + ' 集）';
+    current.title = current.title + (data.isMovie && episodes.length === 1 ? '（电影）' : '（' + episodes.length + ' 集）');
     renderCard();
     if (btnAll) btnAll.hidden = false;
     pagesPanel.hidden = false;
@@ -1737,6 +1741,14 @@
       .map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
     return apiPgc('https://api.bilibili.com/pgc/player/web/playurl?' + q).then(function (result) {
       if (!result || (!result.durl && !result.dash)) throw new Error('该剧集暂无可下载地址（可能需要 VIP / 大会员权限）');
+      // 大会员影视（尤其电影）在无权限账号下只返回试看片段：is_preview=1。
+      // 直接拒绝，避免把 6 分钟试看当完整影片保存下来还显示「完成」。
+      if (result.is_preview === 1) {
+        var previewSec = 0;
+        if (result.durl && result.durl.length && result.durl[0].length) previewSec = Number(result.durl[0].length) / 1000;
+        throw new Error('当前账号只能观看试看片段' + (previewSec ? '（约 ' + fmtDur(Math.round(previewSec)) + '）' : '') +
+          '，未保存文件。该影片需要大会员权限，请登录有权限的账号后重试');
+      }
       return result;
     });
   }
@@ -4467,7 +4479,7 @@
         });
       }
       prepare.then(function () {
-        var t = createTask(safeName(current.title) + ' [' + label + ']', batchData.isSeason ? '番剧' : '分P');
+        var t = createTask(safeName(current.title) + ' [' + label + ']', batchData.isSeason ? (current.isMovie ? '电影' : '番剧') : '分P');
         t.type = type;
         t._part = ' [' + label + ']';
         t.settings.clip = '';            // 批量不支持片段裁剪
@@ -4807,7 +4819,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.1';
+  var APP_VERSION = '1.8.2';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
-// @version      1.3.2
+// @version      1.3.3
 // @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
 // @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
@@ -242,6 +242,11 @@
       });
     }
     request.then(function (d) {
+      // 大会员影视（尤其电影）无权限时只返回试看片段，不能当完整片子下载
+      if (d && d.is_preview === 1) {
+        var sec = (d.durl && d.durl.length && d.durl[0].length) ? Math.round(Number(d.durl[0].length) / 1000) : 0;
+        throw new Error('当前账号只能观看试看片段' + (sec ? '（约 ' + sec + ' 秒）' : '') + '，已取消下载。该影片需要大会员权限');
+      }
       var fn = box.dataset.fileName || ('bili_' + (bvid || 'video'));
       var url = null, name = '', dashOnly = false;
       if (type === 'audio') {
