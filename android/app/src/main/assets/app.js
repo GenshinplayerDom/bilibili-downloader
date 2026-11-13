@@ -543,6 +543,14 @@
     });
   }
 
+  /* PGC 的 publish.pub_time 是 "2025-07-04 10:00:00"（北京时间），转成秒级时间戳 */
+  function pgcPubdate(result) {
+    var t = result && result.publish && result.publish.pub_time;
+    if (!t) return 0;
+    var ms = Date.parse(String(t).replace(' ', 'T') + '+08:00');
+    return isFinite(ms) ? Math.floor(ms / 1000) : 0;
+  }
+
   function mapPgcEpisode(ep, i) {
     return {
       id: ep.ep_id,
@@ -573,7 +581,7 @@
       pic: fixCover(result.cover),
       up: (result.up_info && (result.up_info.uname || result.up_info.name)) || '',
       stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
-      pubdate: 0,
+      pubdate: pgcPubdate(result),
       episodes: eps.map(mapPgcEpisode)
     };
   }
@@ -719,6 +727,7 @@
       return;
     }
     busy = true;
+    setNote('', '');   // 新一次解析先清掉上一次的提示，避免试看/权限提示残留到别的视频
     setFinderState('scanning');
     setStatus('loading', '正在解析链接…');
 
@@ -1452,12 +1461,18 @@
     return fetchPlayurl(16).then(function (pd) {
       current.acceptQuality = (pd && pd.accept_quality) || [];
       current.acceptDescription = (pd && pd.accept_description) || [];
-    }).catch(function () {
+      current.previewOnly = !!(pd && pd.is_preview === 1);
+    }).catch(function (e) {
       current.acceptQuality = [];
       current.acceptDescription = [];
+      current.previewOnly = !!(e && e.preview);
     });
   }
   function fillQnOptions() {
+    // 解析阶段就看出只能试看时提前告知，别等点了下载才失败
+    if (current && current.previewOnly) {
+      setNote('warn', '当前账号对这部影片只有试看权限，下载会失败；请登录具有该影片/剧集权限的账号');
+    }
     if (!qnSelect) return;
     var aq = (current && Array.isArray(current.acceptQuality) && current.acceptQuality.length) ? current.acceptQuality : null;
     var prev = qnSelect.value;
@@ -1746,8 +1761,11 @@
       if (result.is_preview === 1) {
         var previewSec = 0;
         if (result.durl && result.durl.length && result.durl[0].length) previewSec = Number(result.durl[0].length) / 1000;
-        throw new Error('当前账号只能观看试看片段' + (previewSec ? '（约 ' + fmtDur(Math.round(previewSec)) + '）' : '') +
+        else if (result.dash && result.dash.duration) previewSec = Number(result.dash.duration);
+        var prevErr = new Error('当前账号只能观看试看片段' + (previewSec ? '（约 ' + fmtDur(Math.round(previewSec)) + '）' : '') +
           '，未保存文件。该影片需要大会员权限，请登录有权限的账号后重试');
+        prevErr.preview = true;
+        throw prevErr;
       }
       return result;
     });
@@ -4819,7 +4837,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.2';
+  var APP_VERSION = '1.8.3';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩下载器 · GenshinplayerDom（油猴版）
 // @namespace    com.dom.bilidownloader
-// @version      1.3.3
+// @version      1.3.4
 // @description  在哔哩哔哩视频页面直接下载视频/音频（多线程分片 + 直链），与桌面版同一套解析逻辑。by GenshinplayerDom
 // @author       GenshinplayerDom
 // @match        https://www.bilibili.com/video/*
@@ -132,8 +132,24 @@
   function getEpId() {
     var m = /\/bangumi\/play\/ep(\d+)/.exec(location.href);
     if (m) return Number(m[1]);
+    // 只有番剧播放页才允许从页面 HTML 里兜底取 ep_id；
+    // 普通视频页的推荐位也可能出现 "ep_id"，误判会把无关番剧下下来
+    if (!/\/bangumi\/play\//.test(location.href)) return 0;
     var s = /"ep_id":(\d+)/.exec(document.documentElement.innerHTML);
     return s ? Number(s[1]) : 0;
+  }
+  function getSeasonId() {
+    var m = /\/bangumi\/play\/ss(\d+)/.exec(location.href);
+    return m ? Number(m[1]) : 0;
+  }
+  /* ss 页：按季度定位第一集（页面里的 ep_id 可能是推荐位，不可信） */
+  function resolveSeasonFirstEp(ssId) {
+    return apiPgc('https://api.bilibili.com/pgc/view/web/season', { season_id: ssId }).then(function (season) {
+      var eps = season.episodes || [];
+      if (!eps.length) throw new Error('该季度暂无可下载剧集');
+      var e = eps[0];
+      return { epId: e.ep_id, bvid: e.bvid, cid: e.cid, title: (e.long_title || e.title || season.title || '番剧'), seasonTitle: season.title };
+    });
   }
   function pgcErrorMessage(code, message) {
     if (code === 87007 || /充电|upower/i.test(message || '')) return '该视频为充电专属内容，需先为该 UP 主充电并登录有权限的账号';
@@ -216,8 +232,9 @@
 
   function doDownload(type) {
     var epId = getEpId();
+    var ssId = getSeasonId();
     var bvid = getBvid();
-    if (!bvid && !epId) { st('未识别到视频（bvid=' + bvid + '）'); return; }
+    if (!bvid && !epId && !ssId) { st('未识别到视频（bvid=' + bvid + '）'); return; }
     var cid = getCid();
     var qn = Number(box.querySelector('#bd-qn').value);
     // 视频用 fnval=1（传统 durl 合流 MP4，自带音频轨）；fnval=16 是 DASH 分离流，
@@ -226,8 +243,8 @@
     st('获取下载地址…');
     // 番剧页（bangumi/play/ep…）走 PGC 接口；普通视频仍走 x/player/playurl
     var request;
-    if (epId) {
-      request = resolveBangumi(epId).then(function (info) {
+    if (epId || ssId) {
+      request = (epId ? resolveBangumi(epId) : resolveSeasonFirstEp(ssId)).then(function (info) {
         bvid = info.bvid;
         var fn = 'bili_' + safeName(info.seasonTitle || '') + '_' + safeName(info.title) + '_' + (type === 'audio' ? 'audio' : (QNS[qn] || qn));
         box.dataset.fileName = fn;

@@ -184,6 +184,8 @@ const { execFileSync } = require('node:child_process');
     assert.match(await page.locator('#v-title').innerText(), /（电影）/);
     assert.equal(await page.locator('#v-up').innerText(), '哔哩哔哩电影', '电影 UP 名应取 up_info.uname');
     assert.equal(await page.locator('#v-duration').innerText(), '1:59:42', '电影时长应按毫秒换算');
+    // 探测阶段就应提示只有试看权限，而不是等用户点下载才失败
+    await page.waitForFunction(() => /试看/.test(document.querySelector('#dl-note').textContent), null, { timeout: 10000 });
     const movieMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
     await page.locator('#dl-btn').click();
     const movieTask = page.locator('.task-card').last();
@@ -195,6 +197,7 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep900002');
     await page.locator('#url-input').press('Enter');
     await page.waitForFunction(() => /免费电影测试/.test(document.body.innerText), null, { timeout: 10000 });
+    assert.equal((await page.locator('#dl-note').innerText()).includes('试看'), false, '换片后不应残留上一部影片的试看提示');
     await page.locator('#dl-btn').click();
     await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > movieMp4Before, '免费电影应落盘');
