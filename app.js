@@ -571,6 +571,15 @@
   /* 把 pgc/view/web/season 的返回映射成界面既有的 bangumi 结构 */
   function mapPgcSeason(result) {
     var eps = (result && result.episodes) || [];
+    // 未开播 / 只有预告的季度，episodes 为空，内容都在 section 里；
+    // 直接报「未获取到剧集列表」会让用户以为解析坏了
+    var onlySection = false;
+    if (!eps.length && result && Array.isArray(result.section)) {
+      eps = result.section.reduce(function (all, sec) {
+        return all.concat(sec && sec.episodes ? sec.episodes : []);
+      }, []);
+      onlySection = eps.length > 0;
+    }
     var stat = result.stat || {};
     return {
       season_id: result.season_id,
@@ -582,6 +591,7 @@
       up: (result.up_info && (result.up_info.uname || result.up_info.name)) || '',
       stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
       pubdate: pgcPubdate(result),
+      onlySection: onlySection,
       episodes: eps.map(mapPgcEpisode)
     };
   }
@@ -813,7 +823,7 @@
 
   function renderSeason(data, initialIndex) {
     var episodes = (data && data.episodes) || [];
-    if (!episodes.length) throw new Error('未获取到番剧剧集列表');
+    if (!episodes.length) throw new Error('该番剧暂无剧集（可能尚未开播），可在 B 站页面确认后再试');
     current = {
       kind: 'bangumi',
       seasonId: data.season_id,
@@ -828,9 +838,11 @@
       episodes: episodes,
       pageIndex: 0
     };
-    current.title = current.title + (data.isMovie && episodes.length === 1 ? '（电影）' : '（' + episodes.length + ' 集）');
+    current.title = current.title + (data.onlySection ? '（暂无正片）' : data.isMovie && episodes.length === 1 ? '（电影）' : '（' + episodes.length + ' 集）');
+    if (data.onlySection) setNote('warn', '该季度暂无正片（可能尚未开播），下面列出的是预告 / 花絮，可单独下载');
     renderCard();
-    if (btnAll) btnAll.hidden = episodes.length < 2;   // 单集电影没有「批量」可言
+    // 单集作品没有「批量」可言；只有预告/花絮时也不算剧集，不给批量
+    if (btnAll) btnAll.hidden = data.onlySection || episodes.length < 2;
     pagesPanel.hidden = false;
     pagesList.innerHTML = '';
     episodes.forEach(function (ep, i) {
@@ -854,10 +866,17 @@
   function selectEpisode(idx, silent) {
     var ep = current.episodes[idx];
     current.pageIndex = idx;
+    // 每集时长/时间轴独立：切集后旧的分片区间与定时设置必须失效
+    if (clipInput) clipInput.value = '';
+    if (timerInput) timerInput.value = '';
+    if (timerCheck) timerCheck.checked = false;
     current.bvid = ep.bvid;
     current.aid = ep.aid;
     current.cid = ep.cid;
     current.epId = ep.ep_id || ep.id;
+    // 之前这里没更新 duration，切到第 2 集仍显示第 1 集的时长
+    if (ep.duration) current.duration = ep.duration;
+    renderCard();
     var chips = pagesList.children;
     for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('active', i === idx);
     if (!silent) setNote('ok', '已切换到第 ' + (idx + 1) + ' 集');
@@ -914,6 +933,9 @@
     if (p.bvid) current.bvid = p.bvid;
     if (p.aid) current.aid = p.aid;
     current.cid = p.cid;
+    // 分 P 各自的时长不同，切 P 后卡片时长要跟着变（片段校验也依赖它）
+    if (p.duration) current.duration = p.duration;
+    renderCard();
     // 合集 API 不返回 cid：选中时异步补全，保证单集下载可用
     if (!p.cid && p.bvid) {
       viewByVideo({ bvid: p.bvid, aid: p.aid }).then(function (d) {
@@ -4849,7 +4871,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.4';
+  var APP_VERSION = '1.8.5';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

@@ -79,11 +79,18 @@ const { execFileSync } = require('node:child_process');
             rights: { is_preview: 1, only_vip_download: 1 },
             episodes: [{ ep_id: 900001, aid: 900001, bvid: 'BV1movie1x7', cid: 900001, title: '正片', long_title: '', cover: 'https://i0.hdslb.com/e.jpg', duration: 7182000 }]
           } };
-        } else if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('ep_id') === '900002') {
+        } else if (upstream.pathname.startsWith('/pgc/view/web/season') &&
+                   (upstream.searchParams.get('ep_id') === '900002' || upstream.searchParams.get('season_id') === '48412')) {
           body = { code: 0, result: {
             season_id: 48412, type: 2, title: '免费电影测试', season_title: '免费电影测试', cover: 'https://i0.hdslb.com/m2.jpg',
             up_info: { uname: '哔哩哔哩电影' }, stat: { views: 1 }, rights: { is_preview: 0 },
             episodes: [{ ep_id: 900002, aid: 900002, bvid: 'BV1movie2x7', cid: 900002, title: '正片', cover: 'https://i0.hdslb.com/e2.jpg', duration: 3600000 }]
+          } };
+        } else if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('season_id') === '77001') {
+          body = { code: 0, result: {
+            season_id: 77001, type: 1, title: '未开播测试', season_title: '未开播测试', cover: 'https://i0.hdslb.com/nc.jpg',
+            up_info: { uname: '测试番组' }, stat: {}, episodes: [],
+            section: [{ id: 1, title: '预告', episodes: [{ ep_id: 900010, aid: 900010, bvid: 'BV1pre1x7', cid: 900010, title: '预告', cover: 'https://i0.hdslb.com/pv.jpg', duration: 120000 }] }]
           } };
         } else if (upstream.pathname.startsWith('/pgc/view/web/season')) {
           // 番剧季度：3 集，含 ep_id / cid / 毫秒时长
@@ -91,7 +98,7 @@ const { execFileSync } = require('node:child_process');
             season_id: 33145, title: '番剧解析测试', season_title: '番剧解析测试', cover: 'https://i0.hdslb.com/cover.jpg',
             up_info: { name: '测试番组' }, stat: { views: 10, danmakus: 2, likes: 3, reply: 1 },
             episodes: [1, 2, 3].map(i => ({ ep_id: 318440 + i, aid: 1000 + i, bvid: 'BV1xx411c7m' + i, cid: 2000 + i,
-              title: '第 ' + i + ' 话', long_title: '剧集 ' + i, cover: 'https://i0.hdslb.com/ep' + i + '.jpg', duration: 600000 }))
+              title: '第 ' + i + ' 话', long_title: '剧集 ' + i, cover: 'https://i0.hdslb.com/ep' + i + '.jpg', duration: [600000, 1200000, 300000][i - 1] }))
           } };
         } else if (upstream.pathname.startsWith('/pgc/player/web/playurl') && upstream.searchParams.get('ep_id') === '900001') {
           // 大会员电影、无权限账号：只给 6 分钟试看
@@ -161,7 +168,15 @@ const { execFileSync } = require('node:child_process');
     assert.equal(await page.locator('.page-chip').nth(2).getAttribute('class'), 'page-chip active', '应默认选中链接对应的第 3 集');
     // PGC 的 duration 是毫秒：600000ms 必须显示成 10:00，而不是 166 小时
     assert.match(await page.locator('.page-chip').first().innerText(), /10:00/, '剧集时长应按秒格式化');
+    assert.equal(await page.locator('#v-duration').innerText(), '05:00', '默认选中的第 3 集应显示自己的时长');
+
     await page.locator('#type-seg [data-type="video"]').click();
+    // 切集时旧的分片区间必须失效，否则会按上一集的时间轴去截取
+    await page.locator('#clip-input').fill('00:01-00:02');
+    await page.locator('.page-chip').first().click();
+    assert.equal(await page.locator('#v-duration').innerText(), '10:00', '切集后卡片时长必须跟着变');
+    assert.equal(await page.locator('#clip-input').inputValue(), '', '切集应清空上一集的分片区间');
+    await page.locator('.page-chip').nth(2).click();
     // 番剧取流复用上面的真实音视频样本，确保 DASH 合流走真实 FFmpeg 路径
     await application.evaluate((_, media) => { globalThis.smokeMedia = Object.assign(globalThis.smokeMedia || {}, media); }, { '/video': video, '/audio': audio });
     await page.locator('#dl-btn').click();
@@ -203,6 +218,14 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#dl-btn').click();
     await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > movieMp4Before, '免费电影应落盘');
+
+    // 未开播季度：episodes 为空但 section 有预告，必须能展示并提示，不能停在空白
+    await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ss77001');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => /未开播测试/.test(document.querySelector('#v-title').textContent), null, { timeout: 10000 });
+    assert.match(await page.locator('#dl-note').innerText(), /暂无正片/, '未开播季度应提示只有预告 / 花絮');
+    assert.equal(await page.locator('.page-chip').count(), 1, '应回落到 section 里的预告');
+    assert.equal(await page.locator('#btn-all').isVisible(), false, '只有一条预告时不应显示下载全部');
 
     // 媒体页（md…）：不含剧集，需 media → season 两级解析；单集电影不该出现「下载全部」
     const mdMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;

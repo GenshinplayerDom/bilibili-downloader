@@ -2,7 +2,7 @@
 Unicode true
 !define APP_NAME "哔哩下载器"
 !define APP_EXE "哔哩下载器.exe"
-!define APP_VERSION "1.8.4"
+!define APP_VERSION "1.8.5"
 !define APP_ID "BiliDownloader"
 
 ; 可通过 makensis -DAPP_ARCH=ia32 覆盖；默认 x64
