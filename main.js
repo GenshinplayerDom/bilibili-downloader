@@ -275,12 +275,16 @@ async function estimateUrlsBytes(urls) {
   }
   return total;
 }
-/** 从 payload 收集 DASH 媒体流 URL（video/audio，兼容单条/数组） */
-function payloadMediaUrls(payload) {
-  const urls = [];
-  (payload.videoUrls || (payload.videoUrl ? [payload.videoUrl] : [])).forEach(u => urls.push(u));
-  (payload.audioUrls || (payload.audioUrl ? [payload.audioUrl] : [])).forEach(u => urls.push(u));
-  return urls;
+/** 同一路媒体的多个 CDN 备选指向同一份内容：取最大值，不能累加。
+ *  （主 CDN + backupUrl 通常 2~3 个，累加会把预检值放大数倍，误报「磁盘空间不足」） */
+async function maxUrlBytes(urls) {
+  const results = await Promise.allSettled((urls || []).map(u =>
+    downloader.probe(u, new AbortController().signal)));
+  let max = 0;
+  for (const r of results) {
+    if (r.status === 'fulfilled' && Number.isFinite(r.value.total)) max = Math.max(max, r.value.total);
+  }
+  return max;
 }
 /** 下载前磁盘空间预检：分片临时目录 + 合流输出 + faststart 重写，保守按 2.5 倍媒体大小预留，
  *  避免大文件下载到中途/合并阶段才因磁盘写满失败（浪费已下载分片）。 */
@@ -293,9 +297,20 @@ async function precheckUrls(dir, urls) {
     throw new Error('磁盘空间不足：预计需约 ' + fmtBytes(est * 2.5) + '，当前剩余 ' + fmtBytes(free) + '。请清理空间或更换下载目录后重试。');
   }
 }
-/** DASH 合流下载前的磁盘预检 */
+/** DASH 合流下载前的磁盘预检：视频取各 CDN 备选的最大值 + 音频最大值 */
 async function precheckDiskSpace(dir, payload) {
-  return precheckUrls(dir, payloadMediaUrls(payload));
+  const free = diskFreeBytes(dir);
+  if (!Number.isFinite(free)) return;              // 无法探测则不阻断
+  let est = 0;
+  try {
+    const vids = payload.videoUrls || (payload.videoUrl ? [payload.videoUrl] : []);
+    const auds = payload.audioUrls || (payload.audioUrl ? [payload.audioUrl] : []);
+    const [v, a] = await Promise.all([maxUrlBytes(vids), maxUrlBytes(auds)]);
+    est = v + a;
+  } catch (e) { }
+  if (est > 0 && est * 2.5 > free) {
+    throw new Error('磁盘空间不足：预计需约 ' + fmtBytes(est * 2.5) + '，当前剩余 ' + fmtBytes(free) + '。请清理空间或更换下载目录后重试。');
+  }
 }
 /** 直接下载（弹幕/字幕等非媒体文件）：带 UA/Referer、禁用压缩，不经分片下载器，
  *  规避 Range/probe/压缩限制导致的失败 */
@@ -469,8 +484,8 @@ function registerIpc() {
   ipcHandle('bili:logout', async function () {
     await session.defaultSession.clearStorageData({ storages: ['cookies'] });
     proxy.setUserCookies({});
-    try { fs.unlinkSync(path.join(app.getPath('userData'), 'login_cookies.json')); } catch (e) { }
-    try { fs.unlinkSync(path.join(app.getPath('userData'), 'login_cookies.json.enc')); } catch (e) { }
+    // 统一走 CookieStore.clear()：密文、无密钥环时的明文、以及旧版遗留文件都要清掉
+    cookieStore.clear();
     return { ok: true };
   });
   ipcHandle('bili:restart-proxy', function () {

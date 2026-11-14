@@ -57,8 +57,21 @@ test('legacy cookies migrate to encryption; unavailable encryption never writes 
   assert.equal(fs.readFileSync(store.encryptedPath).includes(Buffer.from('FAKE_TEST_TOKEN')), false);
   assert.equal(store.load().SESSDATA, 'FAKE_TEST_TOKEN');
   if (process.platform !== 'win32') assert.equal(fs.statSync(store.encryptedPath).mode & 0o777, 0o600);
+  // 无密钥环时仍须保留登录态：回退到 0600 明文文件，而不是清空凭据
   cipher.isEncryptionAvailable = () => false;
-  assert.equal(store.save({ SESSDATA: 'FAKE_TEST_TOKEN' }), false);
+  assert.equal(store.save({ SESSDATA: 'FAKE_TEST_TOKEN', DedeUserID: '42' }), true);
+  assert.equal(fs.existsSync(store.plainPath), true);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(store.plainPath).mode & 0o777, 0o600);
+  assert.equal(fs.existsSync(store.encryptedPath), false);
+  const restarted = new CookieStore(dir, cipher);
+  assert.equal(restarted.load().DedeUserID, '42');
+  // 加密可用时再次写入应升级为密文并清掉明文
+  cipher.isEncryptionAvailable = () => true;
+  assert.equal(store.save({ SESSDATA: 'FAKE_TEST_TOKEN', DedeUserID: '42' }), true);
+  assert.equal(fs.existsSync(store.plainPath), false);
+  assert.equal(fs.readFileSync(store.encryptedPath).includes(Buffer.from('FAKE_TEST_TOKEN')), false);
+  // 无 SESSDATA 视为退出登录，必须清空
+  assert.equal(store.save({}), false);
   assert.equal(fs.readdirSync(dir).length, 0);
 });
 test('proxy requires authentication and rejects cross-origin or unrelated targets', async t => {
