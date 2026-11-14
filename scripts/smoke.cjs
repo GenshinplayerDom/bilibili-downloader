@@ -69,7 +69,7 @@ const { execFileSync } = require('node:child_process');
           await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 87007, message: '充电专属视频，请先充电' }) });
           return;
         }
-        if (upstream.pathname.endsWith('/playurl')) data = { quality: 80, accept_quality: [80, 64, 32], dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } };
+        if (upstream.pathname.endsWith('/playurl')) data = { quality: 80, accept_quality: [80, 64, 32], dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30216, baseUrl: 'https://test.bilivideo.com/audio-lo', bandwidth: 67169 }, { id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 140764 }] } };
         if (upstream.pathname.startsWith('/pgc/view/web/media')) {
           body = { code: 0, result: { media_id: 22630575, season_id: 48412, title: '免费电影测试', type: 2 } };
         } else if (upstream.pathname.startsWith('/pgc/view/web/season') && upstream.searchParams.get('ep_id') === '900001') {
@@ -105,7 +105,9 @@ const { execFileSync } = require('node:child_process');
           body = { code: 0, result: { quality: 32, is_preview: 1, durl: [{ url: 'https://test.bilivideo.com/video', length: 360708, size: 65536 }], accept_quality: [112, 80] } };
         } else if (upstream.pathname.startsWith('/pgc/player/web/playurl')) {
           body = { code: 0, result: { quality: 80, accept_quality: [80], durl: [{ url: 'https://test.bilivideo.com/video', size: 65536, length: 60 }],
-            dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }], audio: [{ id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 192000 }] } } };
+            dash: { video: [{ id: 80, baseUrl: 'https://test.bilivideo.com/video', codecs: 'avc1', bandwidth: 1000 }],
+              audio: [{ id: 30216, baseUrl: 'https://test.bilivideo.com/audio-lo', bandwidth: 67169 },
+                      { id: 30280, baseUrl: 'https://test.bilivideo.com/audio', bandwidth: 140764 }] } } };
         } else {
           body = { code: 0, data };
         }
@@ -185,6 +187,8 @@ const { execFileSync } = require('node:child_process');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/season') && u.includes('ep_id=318443')), '应使用 PGC 季度接口解析');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/player/web/playurl') && u.includes('ep_id=318443')), '剧集取流必须走 PGC playurl 并带 ep_id');
     assert.ok(fs.readdirSync(downloads).some(name => name.endsWith('.mp4')), '番剧应落盘为 mp4');
+    // 音频档位必须取最高码率（30280），不能因为 30216 排在前面就选 64k 低档
+    assert.equal(upstreamUrls.filter(u => u.includes('audio-lo')).length, 0, '不得请求 64k 低档音频');
     // 整季批量：每集都要带上自己的 ep_id，否则只有第一集会走 PGC 取流
     const mp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
     await page.locator('#btn-all').click();

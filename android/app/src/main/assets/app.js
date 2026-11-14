@@ -3123,18 +3123,18 @@
       usedCodec = want[oi];
     }
     if (!chosen) return null;
-    // 音频：优先 AAC（30216=320k > 30280=192k），其次 FLAC(30232)，杜比类最后
+    // 音频：在 AAC 三档（30216 / 30232 / 30280）里按实际码率取最高。
+    // 旧逻辑把 30216 排在第一位，导致合流一律用 64k 低档，同接口里的 140k 高档被丢弃。
+    // 非 AAC（杜比 / Hi-Res）不参与 mp4 合流，避免兼容性问题。
     var aud = null;
-    var aRank = function (id) {
-      if (id === 30216) return 0;
-      if (id === 30280) return 1;
-      if (id === 30232) return 2;
-      return 3;
+    var aScore = function (item) {
+      var id = item && item.id;
+      var isAac = id === 30216 || id === 30232 || id === 30280;
+      return (isAac ? 1e9 : 0) + (Number(item && item.bandwidth) || 0);
     };
     for (var j = 0; j < auds.length; j++) {
       if (!aud) { aud = auds[j]; continue; }
-      var ra = aRank(auds[j].id), rb = aRank(aud.id);
-      if (ra < rb || (ra === rb && (auds[j].bandwidth || 0) > (aud.bandwidth || 0))) aud = auds[j];
+      if (aScore(auds[j]) > aScore(aud)) aud = auds[j];
     }
     return { video: chosen, audio: aud, codec: usedCodec };
   }
@@ -4871,7 +4871,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.5';
+  var APP_VERSION = '1.8.6';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
