@@ -568,8 +568,15 @@
     };
   }
 
+  /* PGC 会把「预告 / PV / 花絮」当成剧集塞进 episodes：未登录的季度常见
+     10 条预告 + 正片混排，编号还和正片重复（第 6 话既是 34 秒预告也是 18:42 正片）。
+     这里把它们剔出剧集列表，避免误点；只有预告的季度仍全部保留。 */
+  function isTrailerEpisode(ep) {
+    return /预告|PV|花絮|特辑|彩蛋|番外|OAD|OVA/i.test(String((ep && ep.badge) || ''));
+  }
+
   /* 把 pgc/view/web/season 的返回映射成界面既有的 bangumi 结构 */
-  function mapPgcSeason(result) {
+  function mapPgcSeason(result, keepEpId) {
     var eps = (result && result.episodes) || [];
     // 未开播 / 只有预告的季度，episodes 为空，内容都在 section 里；
     // 直接报「未获取到剧集列表」会让用户以为解析坏了
@@ -592,12 +599,21 @@
       stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
       pubdate: pgcPubdate(result),
       onlySection: onlySection,
-      episodes: eps.map(mapPgcEpisode)
+      episodes: trimTrailers(eps.map(mapPgcEpisode), keepEpId)
     };
   }
 
+  function trimTrailers(episodes, keepEpId) {
+    var full = episodes.filter(function (ep) { return !isTrailerEpisode(ep); });
+    if (!full.length) return episodes;                 // 整季只有预告：全保留
+    // 目标本身就是某条预告（用户直接粘了预告链接）：保留全部，否则索引会错位
+    var target = episodes.filter(function (ep) { return String(ep.ep_id) === String(keepEpId || ''); })[0];
+    if (target && isTrailerEpisode(target)) return episodes;
+    return full;
+  }
+
   function pgcSeason(query) {
-    return apiPgc('https://api.bilibili.com/pgc/view/web/season?' + query).then(mapPgcSeason);
+    return apiPgc('https://api.bilibili.com/pgc/view/web/season?' + query).then(function (r) { return mapPgcSeason(r); });
   }
 
   function viewByVideo(q) {
@@ -642,7 +658,7 @@
   }
   function viewByEp(epId) {
     return apiPgc('https://api.bilibili.com/pgc/view/web/season?ep_id=' + encodeURIComponent(epId)).then(function (result) {
-      var season = mapPgcSeason(result);
+      var season = mapPgcSeason(result, epId);
       var idx = -1;
       season.episodes.forEach(function (ep, i) { if (String(ep.ep_id) === String(epId)) idx = i; });
       if (idx >= 0) { season.initialIndex = idx; return season; }
@@ -854,6 +870,8 @@
       if (/第\s*.+?[话集]/.test(t)) label = t;                    // 第1话 / 第 2 集
       else if (t && /正片|预告|PV|花絮|访谈|彩蛋|番外|特典|OAD|OVA/i.test(t)) label = t;  // PGC 常见命名
       else label = t ? ('第 ' + t + ' 话') : ('第 ' + (i + 1) + ' 话');
+      // 预告/PV 与正片同编号时加前缀，避免「第 6 话 00:34」被当成正片
+      if (isTrailerEpisode(ep)) label = (ep.badge || '预告') + ' · ' + label;
       if (ep.long_title) label += ' · ' + ep.long_title;
       chip.innerHTML = '<span class="page-part">' + escHtml(label) + '</span>' +
         '<span class="page-dur">' + fmtDur(ep.duration || 0) + '</span>';
