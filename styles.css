@@ -32,7 +32,6 @@ html[data-theme="dark"] {
 html[data-theme="dark"] body { background: var(--bg); }
 html[data-theme="dark"] .card,
 html[data-theme="dark"] .set-section,
-html[data-theme="dark"] .task-item,
 html[data-theme="dark"] .history-panel,
 html[data-theme="dark"] .queue-panel,
 html[data-theme="dark"] .settings-panel,
@@ -329,7 +328,6 @@ body.no-select { user-select: none; }
 }
 .hist-item .hist-actions button:hover { border-color: var(--brand); color: var(--brand-dark); }
 .hist-item .hist-actions button.danger:hover { border-color: #e05b5b; color: #e05b5b; }
-.hist-item.deleted { opacity: 0.55; }
 
 /* ---------- 任务卡操作键 ---------- */
 .task-actions {
@@ -1146,7 +1144,7 @@ body.overlay-active .tasks-card {
     min-height: 42px;
     font-size: 15px;
   }
-  .btn, .set-btn, .opt-row select, .task-actions button, .search-btn, .primary-btn, button.action {
+  .btn, .set-btn, .opt-row select, .task-actions button, .search-btn, button.action {
     min-height: 40px;
     padding: 9px 14px;
     font-size: 14px;
@@ -1158,7 +1156,6 @@ body.overlay-active .tasks-card {
   .video-card { flex-direction: column; gap: 8px; padding: 10px; }
   .cover-wrap { width: 100%; height: 176px; }
   .video-info { padding: 0; }
-  .video-title { font-size: 15px; line-height: 1.35; }
 
   /* 表格：横向可滚动，避免挤压 */
   .table-wrap, .list-panel table, table.data { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -1175,7 +1172,7 @@ body.overlay-active .tasks-card {
   .set-btn { width: 100%; margin-top: 6px; }
 
   /* 悬浮窗 / 队列面板 / 弹窗：全宽 */
-  .float-window, .queue-panel, .player-modal, .support-box {
+  .queue-panel, .player-modal, .support-box {
     width: 100% !important; max-width: 100% !important;
     left: 0 !important; right: 0 !important; bottom: 0 !important;
     border-radius: 14px 14px 0 0 !important;
@@ -1187,37 +1184,17 @@ body.overlay-active .tasks-card {
   /* 任务卡：紧凑 */
   .task-card { padding: 10px; }
   .task-name { font-size: 13px; }
-  .progress-bar { height: 14px; }
-
-  /* 下载记录行 / 历史列表：紧凑大触控 */
-  .his-row, .dl-row, .queue-row { padding: 10px 8px; min-height: 52px; }
-  .his-row button, .dl-row button, .queue-row button { min-height: 36px; padding: 7px 10px; }
 
   /* 引导弹窗 */
   .guide-box { max-width: 100%; padding: 18px 16px; max-height: 90vh; }
 
-  /* 搜索区 */
-  .search-bar { flex-wrap: wrap; }
-  .search-bar input { flex: 1 1 100%; }
-  .search-bar .btn { flex: 1; }
-
-  /* 底部入口（历史 / 队列 / 设置 / 主菜单）大触控 */
-  .bottom-nav button, .side-nav button { min-height: 46px; font-size: 13px; }
-
-  /* 悬浮球 */
-  .float-dot { width: 46px; height: 46px; font-size: 18px; }
-
   /* 安全区适配（刘海屏 / 手势条） */
   body { padding-bottom: env(safe-area-inset-bottom, 0); }
-  .bottom-nav, .side-nav { padding-bottom: env(safe-area-inset-bottom, 0); }
   .settings-panel { padding-bottom: calc(env(safe-area-inset-bottom, 0) + 16px); }
 
   /* 防止横向溢出与滚动卡顿 */
   html, body { overflow-x: hidden; }
   * { -webkit-tap-highlight-color: transparent; }
-  .container, .video-card, .task-card, .his-row, .dl-row, .queue-row {
-    -webkit-overflow-scrolling: touch;
-  }
 
   /* 输入框聚焦时不放大（iOS/Android 字体>=16px 不缩放） */
   input[type="text"], input[type="url"], input[type="number"], input[type="password"],

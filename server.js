@@ -752,13 +752,9 @@ module.exports = {
   handleRequest: handleRequest,
   start: start,
   stop: stop,
-  LISTEN_HOSTS: LISTEN_HOSTS,
   setUserCookies: setUserCookies,
   getUserLoginInfo: getUserLoginInfo,
-  getProxyPort: function () { return PORT; },
   buildCookie: buildCookie,
-  ensureBuvid: ensureBuvid,
-  resetBuvid: resetBuvid
 };
 
 if (require.main === module) {

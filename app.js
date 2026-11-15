@@ -126,7 +126,6 @@
   var batchThread = $('batch-thread');
   var batchFmt = $('batch-fmt');
   var batchActive = false;
-  var batchTasks = [];
   var batchData = null;
   var batchStarted = false;
   var playerClose = $('player-close');
@@ -373,7 +372,7 @@
 
   /* ---------- 顶部轻提示（不遮挡操作，自动消失） ---------- */
   var toastTimer = null;
-  function showToast(msg, type) {
+  function showToast(msg) {
     if (!toastEl) return;
     toastEl.textContent = msg;
     toastEl.className = 'show';
@@ -448,7 +447,7 @@
           // pairBase 来自用户设置（可被导入的设置文件篡改），拼进 href 前必须转义，避免 DOM XSS
           tipHtml = '网站端需搭配本机代理并完成一次性授权：① 在电脑上运行 start-server.bat（Windows）或 node server.js（Mac / Linux）；② 在该电脑浏览器 <a href="' + escAttr(pairLink) + '" target="_blank" rel="noopener" style="color:#ff3b7a;font-weight:700;text-decoration:underline;">打开授权页并点击「授权」</a>；③ 回本页刷新。手机使用：电脑改用 start-server.bat --lan（或 node server.js --lan），并在设置-代理-自定义地址填 http://&lt;电脑局域网IP&gt;:8123';
         } else {
-          tip = '代理未连接：请确认本地代理正在运行；网页版若刚重启过代理，请重新打开 http://127.0.0.1:8123/pair 授权后刷新，或点击设置中的「一键修复」';
+          tip = '代理未连接：' + (webPairError || '请确认本地代理正在运行') + '；网页版若刚重启过代理，请重新打开 http://127.0.0.1:8123/pair 授权后刷新，或点击设置中的「一键修复」';
         }
       }
       if (tipHtml) proxyTip.innerHTML = tipHtml; else proxyTip.textContent = tip;
@@ -1172,7 +1171,7 @@
   function renderListTable() {
     if (!listTbody || !listState) return;
     listTbody.innerHTML = '';
-    listPageItems().forEach(function (it, i) {
+    listPageItems().forEach(function (it) {
       var tr = document.createElement('tr');
       if (listState.checked[it.bvid]) tr.className = 'row-checked';
       var tdCk = document.createElement('td');
@@ -1415,7 +1414,7 @@
         if (playerTitle) playerTitle.textContent = '在线播放（已降级）：' + (title || '');
       }
       playerVideo.play().catch(function () { });
-    }).catch(function (e) {
+    }).catch(function () {
       // 播放阶段再次失败 → 继续降级
       playerVideo.onerror = function () { playerFallback(title, depth + 1); };
       playerVideo.play().catch(function () { playerFallback(title, depth + 1); });
@@ -1505,7 +1504,7 @@
       clip: '', danmaku: false, subtitle: false
     };
     var n = items.length;
-    items.forEach(function (it, idx) {
+    items.forEach(function (it) {
       var snap = {
         kind: 'video', bvid: it.bvid, aid: it.aid, cid: it.cid, title: it.title,
         pic: it.pic, up: '', duration: it.duration, stat: it.stat, pubdate: 0,
@@ -1581,7 +1580,6 @@
     var m = Math.floor(n / 60), s2 = n % 60;
     return m + ':' + String(s2).padStart(2, '0');
   }
-  var searchSeq = 0;
   /** 搜索专用请求：优先走本机代理（设备身份，搜索接口风控较严），失败回退直连 */
   function searchApiGet(url) {
     var viaProxy = function () {
@@ -2197,7 +2195,7 @@
     window.biliAPI.download(url, filename, cbId);
   }
   /** Android DASH 高清合并：原生下载视频轨 + 音频轨，MediaMuxer 封装 MP4 */
-  function androidMuxDownload(task, entry, filename, fmt) {
+  function androidMuxDownload(task, entry, filename) {
     if (!entry.audioUrls || !entry.audioUrls.length) {
       setTaskStatus(task, 'error', '无法合并');
       setTaskNote(task, 'fail', '该视频无独立音频轨，Android 版无法进行高清合并');

@@ -6,7 +6,6 @@ const path = require('path');
 if (process.env.BILI_DATA_DIR) app.setPath('userData', path.resolve(process.env.BILI_DATA_DIR));
 const fs = require('fs');
 const zlib = require('zlib');
-const https = require('https');
 const childProcess = require('child_process');
 const proxy = require('./server.js');
 const security = require('./lib/security');
@@ -836,7 +835,7 @@ app.whenReady().then(function () {
   setupGlobalDownload();
   // 先创建窗口立即显示 UI（避免代理网络初始化阻塞启动、造成卡顿白屏），
   // 代理异步就绪；页面加载后会自行探测并轮询等待代理连接。
-  const w = createWindow();
+  createWindow();
 
 
   app.on('activate', function () {
