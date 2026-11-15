@@ -172,13 +172,14 @@ function openLoginWindow() {
 function safeName(name) { return security.safeName(name); }
 // 登录态有效性探测：nav 明确返回 isLogin:false 才判定过期，网络失败一律沿用本地判断，
 // 避免断网时把有效登录误判成过期。结果缓存 10 分钟，避免每次刷新都打一次接口。
-let loginProbeCache = { at: 0, logged: false, uid: '' };
-function resetLoginProbe() { loginProbeCache = { at: 0, logged: false, uid: '' }; }
+let loginProbeCache = { at: 0, logged: false, uid: '', ttl: 0 };
+function resetLoginProbe() { loginProbeCache = { at: 0, logged: false, uid: '', ttl: 0 }; }
 async function loginStateWithProbe() {
   const info = proxy.getUserLoginInfo();
   if (!info.logged) return info;
-  if (loginProbeCache.at && Date.now() - loginProbeCache.at < 600e3 && loginProbeCache.uid === info.uid) {
-    return Object.assign({}, info, { expired: !loginProbeCache.logged });
+  const hit = loginProbeCache;
+  if (hit.at && hit.uid === info.uid && Date.now() - hit.at < (hit.ttl || 600e3)) {
+    return Object.assign({}, info, { expired: !hit.logged });
   }
   try {
     const ac = new AbortController();
@@ -191,18 +192,23 @@ async function loginStateWithProbe() {
     } finally { clearTimeout(timer); }
     // code -101 = 账号未登录（Cookie 失效），0 + isLogin:false = 匿名态；这两种才算过期
     if (json && ((json.code === 0 && json.data && json.data.isLogin === false) || json.code === -101)) {
-      loginProbeCache = { at: Date.now(), logged: false, uid: info.uid };
+      loginProbeCache = { at: Date.now(), logged: false, uid: info.uid, ttl: 600e3 };
       return Object.assign({}, info, { expired: true });
     }
-    if (json && json.code === 0) loginProbeCache = { at: Date.now(), logged: true, uid: info.uid };
-  } catch (e) { /* 网络异常：不改变本地判断 */ }
-  return Object.assign({}, info, { expired: false });
+    if (json && json.code === 0) loginProbeCache = { at: Date.now(), logged: true, uid: info.uid, ttl: 600e3 };
+  } catch (e) {
+    // 网络异常：不改变本地判断，但短时不要反复探测（否则离线时每次刷新都卡 3 秒）
+    loginProbeCache = { at: Date.now(), logged: true, uid: info.uid, ttl: 60e3 };
+  }
+  return Object.assign({}, info, { expired: !loginProbeCache.logged });
 }
 function saveLoginCookies(map) { proxy.setUserCookies(map); resetLoginProbe(); }
 function restoreLoginCookies() {
   cookieStore = new CookieStore(app.getPath('userData'), safeStorage);
   const saved = cookieStore.load();
-  proxy.onCookiesChanged(cookies => cookieStore.save(cookies));
+  // Cookie 一旦变化（登录窗扫码、网页端粘贴、退出），登录探测缓存立即作废，
+  // 否则同一账号重新登录后可能继续显示 10 分钟前的「已过期」
+  proxy.onCookiesChanged(cookies => { cookieStore.save(cookies); resetLoginProbe(); });
   proxy.setUserCookies(saved);
 }
 
