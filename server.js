@@ -163,15 +163,22 @@ function httpsGet(url, headers) {
 
 /* 跟随 302 重定向（最多 5 次），用于 /stream 媒体转发：
  * B 站 CDN 常返回 302 到真实节点，若透传 302 给 <video>，浏览器跟随到直链后无 Referer 会被防盗链 403 */
-function httpsGetFollow(url, headers, depth) {
+function httpsGetFollow(url, headers, depth, cookieFor) {
   depth = depth || 0;
   if (depth > 5) return Promise.reject(new Error('重定向次数过多'));
-  return httpsGet(url, headers).then(function (res) {
+  // 每一跳都重新计算 Cookie：302 跳到第三方 PCDN 时必须丢弃 SESSDATA
+  var hopHeaders = headers;
+  if (cookieFor) {
+    hopHeaders = Object.assign({}, headers);
+    var ck = cookieFor(url);
+    if (ck) hopHeaders.Cookie = ck; else delete hopHeaders.Cookie;
+  }
+  return httpsGet(url, hopHeaders).then(function (res) {
     if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
       res.resume();
       var loc = res.headers.location;
       var next = /^https?:\/\//i.test(loc) ? loc : urlMod.resolve(url, loc);
-      return httpsGetFollow(next, headers, depth + 1);
+      return httpsGetFollow(next, headers, depth + 1, cookieFor);
     }
     return res;
   });
@@ -533,7 +540,8 @@ function handleRequest(req, res) {
     return sendJson(res, 200, { ok: true, token: accessToken, port: PORT });
   }
 
-  var supplied = Buffer.from(String(req.headers['x-bili-token'] || q.token || ''));
+  // token 只允许走请求头；例外是 /stream：<video> 标签无法设置请求头，只能带查询串
+  var supplied = Buffer.from(String(req.headers['x-bili-token'] || (u.pathname === '/stream' ? q.token : '') || ''));
   var expected = Buffer.from(accessToken);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return sendJson(res, 401, { ok: false, error: '代理认证失败，请使用客户端或本地代理主页' });
   if (q.url) {
@@ -644,13 +652,15 @@ function handleRequest(req, res) {
     }
     var hdrs = {
       'User-Agent': UA,
-      'Referer': 'https://www.bilibili.com/',
-      'Cookie': buildCookie()   // CDN 防盗链需要设备身份 + 登录 Cookie，缺失会导致 403
+      'Referer': 'https://www.bilibili.com/'
+      // Cookie 不在这里预置：只有官方 CDN 域才带，且每一跳重定向都要重新判断
     };
     if (req.headers.range) hdrs.Range = req.headers.range;
     // 流请求不做节流（保证多线程并发下载不被串行拖慢）
     // 跟随 CDN 302 重定向，避免 <video> 跟随到无 Referer 的直链被防盗链拦截
-    return httpsGetFollow(q.url, hdrs).then(function (up) {
+    return httpsGetFollow(q.url, hdrs, 0, function (target) {
+      return security.mediaCookie(target, buildCookie());
+    }).then(function (up) {
       res.statusCode = up.statusCode;
       // Content-Type 兜底：B 站 m4s(fMP4) 部分节点返回 application/octet-stream，<video> 可能不识别
       var ct = up.headers['content-type'];

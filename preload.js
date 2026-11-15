@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('biliAPI', {
   login: function () {
     return ipcRenderer.invoke('bili:login');
   },
+  logError: function (message) {
+    return ipcRenderer.invoke('bili:log', 'error', String(message == null ? '' : message));
+  },
   loginState: function () {
     return ipcRenderer.invoke('bili:login-state');
   },

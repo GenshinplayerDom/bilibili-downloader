@@ -350,6 +350,27 @@
     dlNote.textContent = text || '';
   }
 
+  /* ---------- 全局错误兜底：页面里任何未捕获异常都要留下痕迹 ---------- */
+  var clientErrorAt = 0;
+  function reportClientError(kind, detail) {
+    var text = kind + '：' + String(detail == null ? '' : detail).slice(0, 1200);
+    try { console.error(text); } catch (e) { }
+    try { if (window.biliAPI && window.biliAPI.logError) window.biliAPI.logError(text); } catch (e) { }
+    if (Date.now() - clientErrorAt < 30000) return;   // 连续报错时不刷屏
+    clientErrorAt = Date.now();
+    try {
+      if (typeof setNote === 'function') setNote('err', '页面出现异常，已记录到 bili.log（' + kind + '）');
+      if (typeof showToast === 'function') showToast('已记录错误，可在设置里反馈日志', 'warn');
+    } catch (e) { }
+  }
+  window.addEventListener('error', function (e) {
+    reportClientError('脚本错误', (e && e.message || '') + ' @' + (e && e.filename || '') + ':' + (e && e.lineno || ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    reportClientError('未处理的 Promise 拒绝', r && (r.stack || r.message) ? (r.stack || r.message) : r);
+  });
+
   /* ---------- 顶部轻提示（不遮挡操作，自动消失） ---------- */
   var toastTimer = null;
   function showToast(msg, type) {

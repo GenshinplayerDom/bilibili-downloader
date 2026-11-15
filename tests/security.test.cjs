@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { once } = require('node:events');
-const { validateUrl, cookieHeaders, safeName, reserveOutput, assertManagedPath, assertResumeDir } = require('../lib/security');
+const { validateUrl, cookieHeaders, mediaCookie, safeName, reserveOutput, assertManagedPath, assertResumeDir } = require('../lib/security');
 const { CookieStore } = require('../lib/cookie-store');
 const proxy = require('../server');
 
@@ -17,6 +17,14 @@ test('URL policy rejects untrusted hosts, userinfo, ports, schemes and suffix tr
   assert.equal(validateUrl('http://a.bilivideo.com/video', 'media').protocol, 'https:');
   assert.deepEqual(cookieHeaders('https://a.bilivideo.com/video', 'SESSDATA=fake'), {});
   assert.deepEqual(cookieHeaders('https://unrelated.invalid/', 'SESSDATA=fake'), {});
+
+  // 媒体流：官方 CDN 域才带 Cookie，第三方 PCDN / 未知域一律不带
+  assert.equal(mediaCookie('https://upos-sz-mirror08c.bilivideo.com/x.m4s', 'SESSDATA=fake'), 'SESSDATA=fake');
+  assert.equal(mediaCookie('https://cdn.hdslb.com/x.m4s', 'SESSDATA=fake'), 'SESSDATA=fake');
+  assert.equal(mediaCookie('https://xy1-1.mountaintoys.cn/x.m4s', 'SESSDATA=fake'), '');
+  assert.equal(mediaCookie('https://v1.biliyungic.com/x.m4s', 'SESSDATA=fake'), '');
+  assert.equal(mediaCookie('https://evil-bilivideo.com/x.m4s', 'SESSDATA=fake'), '');
+  assert.equal(mediaCookie('not a url', 'SESSDATA=fake'), '');
 });
 test('names are safe and concurrent reservations never overwrite a file', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-path-test-'));

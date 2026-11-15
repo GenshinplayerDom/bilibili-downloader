@@ -71,6 +71,13 @@ function logMsg(kind, msg) {
   } catch (e) { }
 }
 function logError(msg) { logMsg('error', msg); }
+// 主进程兜底：未捕获异常/未处理拒绝写日志后继续运行，避免静默退出
+process.on('uncaughtException', function (error) {
+  logError('主进程未捕获异常：' + (error && error.stack ? error.stack : String(error)));
+});
+process.on('unhandledRejection', function (reason) {
+  logError('主进程未处理拒绝：' + (reason && reason.stack ? reason.stack : String(reason)));
+});
 /* ---------- 内置代理（端口自动探测：8123 被占用时顺延，避免代理起不来导致无法解析） ---------- */
 async function startProxy() {
   for (let p = 8123; p <= 8138; p++) {
@@ -507,6 +514,12 @@ function registerIpc() {
     const control = controls.get(token);
     if (!control) return { ok: false };
     control.resume(); return { ok: true };
+  });
+  // 渲染进程错误上报：只接收短文本，落到同一份 bili.log，便于用户反馈时对照
+  ipcHandle('bili:log', function (_, level, message) {
+    var text = String(message == null ? '' : message).slice(0, 2000);
+    logMsg(level === 'error' ? 'renderer-error' : 'renderer', text);
+    return { ok: true };
   });
   ipcHandle('bili:login', function () {
     if (loginWin) return { ok: false, error: '登录窗口已打开' };

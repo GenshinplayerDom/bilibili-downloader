@@ -30,4 +30,19 @@ if (pkgVersion !== appVersion || pkgVersion !== nsiVersion) {
   throw new Error('版本号不一致：package.json=' + pkgVersion + ' app.js=' + appVersion + ' install.nsi=' + nsiVersion);
 }
 
+// 版本号漂移防护：README 必须与 package.json 同版本；Android / 油猴各自版本号也必须存在，
+// 且 Android UA 后缀不允许再写死常量（必须读 BuildConfig.VERSION_NAME）
+const readmeVersion = /当前版本[^\n]*?(\d+\.\d+\.\d+)/.exec(read('README.md').toString('utf8'));
+if (!readmeVersion || readmeVersion[1] !== pkgVersion) {
+  throw new Error('README 版本与 package.json 不一致：README=' + (readmeVersion && readmeVersion[1]) + ' package=' + pkgVersion);
+}
+const gradleVersion = /versionName\s+"([^"]+)"/.exec(read('android/app/build.gradle').toString('utf8'));
+if (!gradleVersion || !gradleVersion[1]) throw new Error('android/app/build.gradle 缺少 versionName');
+const scriptVersion = /@version\s+(\S+)/.exec(read('bilibili-downloader.user.js').toString('utf8'));
+if (!scriptVersion || !scriptVersion[1]) throw new Error('油猴脚本缺少 @version');
+const activity = read('android/app/src/main/java/com/dom/bilidownloader/MainActivity.java').toString('utf8');
+if (!/BiliDownloader\/"\s*\+\s*BuildConfig\.VERSION_NAME/.test(activity)) {
+  throw new Error('MainActivity UA 后缀必须读取 BuildConfig.VERSION_NAME');
+}
+
 console.log('Syntax, Android asset consistency and version consistency checks passed.');

@@ -67,7 +67,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        s.setUserAgentString(s.getUserAgentString() + " BiliDownloader/1.1.4");
+        s.setUserAgentString(s.getUserAgentString() + " BiliDownloader/" + BuildConfig.VERSION_NAME);
 
         // 控制台日志写入文件，便于真机排查
         webView.setWebChromeClient(new WebChromeClient() {
