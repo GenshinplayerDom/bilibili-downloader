@@ -3686,7 +3686,9 @@
 
   function renderLoginState(info) {
     var logged = !!(info && info.logged);
-    loginLogged = logged;
+    // SESSDATA 存在但 nav 判定未登录：Cookie 已过期，界面不能继续显示「已登录」
+    var expired = logged && !!(info && info.expired);
+    loginLogged = logged && !expired;
     var uid = info && info.uid ? String(info.uid) : '';
     if (currentUid !== null && uid !== currentUid) {
       // 登录 / 退出切换：清空下载地址缓存，避免复用旧账号（或未登录）的低清直链
@@ -3695,14 +3697,16 @@
     }
     currentUid = uid;
     if (loginStateEl) {
-      loginStateEl.textContent = logged ? ('已登录（UID ' + (info.uid || '') + '）') : '未登录';
-      loginStateEl.className = 'login-state' + (logged ? ' logged' : '');
+      loginStateEl.textContent = expired
+        ? ('登录已过期（UID ' + (info.uid || '') + '），请重新登录')
+        : logged ? ('已登录（UID ' + (info.uid || '') + '）') : '未登录';
+      loginStateEl.className = 'login-state' + (logged && !expired ? ' logged' : '');
     }
     if (loginBadge) {
-      loginBadge.textContent = logged ? '已登录' : '未登录';
-      loginBadge.className = 'login-badge' + (logged ? ' on' : '');
+      loginBadge.textContent = expired ? '登录过期' : logged ? '已登录' : '未登录';
+      loginBadge.className = 'login-badge' + (logged && !expired ? ' on' : '');
     }
-    if (loginBtn) loginBtn.hidden = logged;
+    if (loginBtn) loginBtn.hidden = logged && !expired;
     if (logoutBtn) logoutBtn.hidden = !logged;
     if (cookieRow && !window.biliAPI) cookieRow.hidden = false;
   }

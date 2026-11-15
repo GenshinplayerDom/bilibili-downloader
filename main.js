@@ -170,7 +170,35 @@ function openLoginWindow() {
 }
 
 function safeName(name) { return security.safeName(name); }
-function saveLoginCookies(map) { proxy.setUserCookies(map); }
+// 登录态有效性探测：nav 明确返回 isLogin:false 才判定过期，网络失败一律沿用本地判断，
+// 避免断网时把有效登录误判成过期。结果缓存 10 分钟，避免每次刷新都打一次接口。
+let loginProbeCache = { at: 0, logged: false, uid: '' };
+function resetLoginProbe() { loginProbeCache = { at: 0, logged: false, uid: '' }; }
+async function loginStateWithProbe() {
+  const info = proxy.getUserLoginInfo();
+  if (!info.logged) return info;
+  if (loginProbeCache.at && Date.now() - loginProbeCache.at < 600e3 && loginProbeCache.uid === info.uid) {
+    return Object.assign({}, info, { expired: !loginProbeCache.logged });
+  }
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 3000);
+    let json = null;
+    try {
+      const res = await fetch('http://127.0.0.1:' + PROXY_PORT + '/api?url=' +
+        encodeURIComponent('https://api.bilibili.com/x/web-interface/nav'), { headers: { 'X-Bili-Token': proxy.getAccessToken() }, signal: ac.signal });
+      json = await res.json();
+    } finally { clearTimeout(timer); }
+    // code -101 = 账号未登录（Cookie 失效），0 + isLogin:false = 匿名态；这两种才算过期
+    if (json && ((json.code === 0 && json.data && json.data.isLogin === false) || json.code === -101)) {
+      loginProbeCache = { at: Date.now(), logged: false, uid: info.uid };
+      return Object.assign({}, info, { expired: true });
+    }
+    if (json && json.code === 0) loginProbeCache = { at: Date.now(), logged: true, uid: info.uid };
+  } catch (e) { /* 网络异常：不改变本地判断 */ }
+  return Object.assign({}, info, { expired: false });
+}
+function saveLoginCookies(map) { proxy.setUserCookies(map); resetLoginProbe(); }
 function restoreLoginCookies() {
   cookieStore = new CookieStore(app.getPath('userData'), safeStorage);
   const saved = cookieStore.load();
@@ -479,7 +507,7 @@ function registerIpc() {
     return openLoginWindow();
   });
   ipcHandle('bili:login-state', function () {
-    return proxy.getUserLoginInfo();
+    return loginStateWithProbe();
   });
   ipcHandle('bili:logout', async function () {
     await session.defaultSession.clearStorageData({ storages: ['cookies'] });
