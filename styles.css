@@ -1200,3 +1200,322 @@ body.overlay-active .tasks-card {
   input[type="text"], input[type="url"], input[type="number"], input[type="password"],
   input[type="time"], select, textarea { font-size: 16px; }
 }
+
+/* ============================================================
+ * 番剧 / 电影独立下载页（PGC 专用）
+ * ============================================================ */
+.pgc-page {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  background: var(--bg);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 120px;
+}
+.pgc-page[hidden] { display: none; }
+.pgc-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -16px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.pgc-topbar .icon-btn { margin: 0; }
+.pgc-topbar-main { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.pgc-kind {
+  flex: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+.pgc-kind.movie { background: #7c5cff; }
+.pgc-topbar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--sub);
+}
+
+.pgc-hero {
+  max-width: 980px;
+  margin: 16px auto 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 18px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.pgc-cover {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--hover);
+}
+.pgc-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pgc-hero-info { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pgc-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.25;
+  color: var(--text);
+  letter-spacing: -.3px;
+}
+.pgc-meta { display: flex; flex-wrap: wrap; gap: 7px; }
+.pgc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pgc-chip strong { color: var(--text); font-weight: 700; }
+.pgc-chip.score { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); color: var(--brand-dark); }
+.pgc-chip.score strong { color: var(--brand-dark); }
+.pgc-desc {
+  margin: 0;
+  color: var(--sub);
+  font-size: 13px;
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pgc-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.pgc-hero-actions .mini-btn { margin: 0; }
+
+.pgc-section-head {
+  max-width: 980px;
+  margin: 20px auto 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pgc-section-head h2 { margin: 0; font-size: 17px; color: var(--text); }
+.pgc-ep-summary { font-size: 12px; color: var(--sub); }
+.pgc-filter {
+  margin-left: auto;
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  gap: 2px;
+}
+.pgc-filter-btn {
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--sub);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  min-height: 32px;
+}
+.pgc-filter-btn.active { background: var(--brand); color: #fff; font-weight: 600; }
+.pgc-filter-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.pgc-ep-list {
+  max-width: 980px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+.pgc-ep {
+  appearance: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  min-height: 58px;
+}
+.pgc-ep:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); background: var(--hover); }
+.pgc-ep:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.pgc-ep.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, var(--card));
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.pgc-ep-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pgc-ep-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pgc-ep-dur { flex: none; font-size: 11px; color: var(--sub); font-variant-numeric: tabular-nums; }
+.pgc-ep-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--sub);
+}
+.pgc-ep-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+}
+.pgc-ep-badge.vip { background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand-dark); }
+.pgc-empty {
+  max-width: 980px;
+  margin: 10px auto 0;
+  padding: 24px;
+  text-align: center;
+  color: var(--sub);
+  background: var(--card);
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+.pgc-panel {
+  max-width: 980px;
+  margin: 22px auto 0;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.pgc-panel-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.pgc-panel-head h2 { margin: 0; font-size: 17px; color: var(--text); }
+.pgc-panel-hint { font-size: 12px; color: var(--sub); }
+.pgc-opt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+.pgc-opt-grid .opt-row { margin: 0; }
+.pgc-opt-grid .opt-row select,
+.pgc-opt-grid .opt-row input { width: 100%; min-width: 0; }
+.pgc-opt-wide { grid-column: 1 / -1; }
+.pgc-note {
+  min-height: 18px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--sub);
+  line-height: 1.5;
+}
+.pgc-note.warn { color: var(--warn); }
+.pgc-note.ok { color: var(--ok); }
+.pgc-note.err { color: var(--bad); }
+
+.pgc-actionbar {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 4;
+  width: min(980px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(31, 35, 41, .16);
+  backdrop-filter: blur(12px);
+}
+.pgc-selected {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pgc-selected strong { color: var(--text); }
+.pgc-actionbar-btns { display: flex; align-items: center; gap: 8px; flex: none; }
+.pgc-actionbar-btns .mini-btn { margin: 0; }
+.pgc-dl-btn {
+  position: static;
+  width: auto;
+  min-width: 128px;
+  margin: 0;
+  padding: 11px 22px;
+}
+
+@media (max-width: 720px) {
+  .pgc-page { padding: 0 10px 132px; }
+  .pgc-topbar { margin: 0 -10px; padding: 10px; }
+  .pgc-hero {
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .pgc-cover { aspect-ratio: 2 / 3; }
+  .pgc-title { font-size: 18px; }
+  .pgc-desc { -webkit-line-clamp: 2; font-size: 12px; }
+  .pgc-section-head { margin-top: 16px; }
+  .pgc-filter { margin-left: 0; width: 100%; }
+  .pgc-filter-btn { flex: 1; }
+  .pgc-ep-list { grid-template-columns: 1fr; }
+  .pgc-panel { padding: 12px; }
+  .pgc-opt-grid { grid-template-columns: 1fr; }
+  .pgc-actionbar {
+    bottom: 0;
+    width: 100%;
+    border-radius: 14px 14px 0 0;
+    flex-wrap: wrap;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0));
+    gap: 8px;
+  }
+  .pgc-selected { flex-basis: 100%; }
+  .pgc-actionbar-btns { width: 100%; }
+  .pgc-download-all { display: none; }
+  .pgc-dl-btn { flex: 1; width: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pgc-page { scroll-behavior: auto; }
+}
+
+/* PGC 页打开时隐藏左侧悬浮栏，避免遮挡下载选项 */
+body.pgc-open .left-rail { display: none !important; }
+
+html[data-theme="dark"] .pgc-dl-btn {
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  border: none;
+  color: #fff;
+}

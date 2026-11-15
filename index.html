@@ -604,6 +604,123 @@
   </div>
 </div>
 
+<!-- 番剧 / 电影独立下载页（PGC 专用，替换主界面） -->
+<section class="pgc-page" id="pgc-page" hidden aria-labelledby="pgc-title">
+  <div class="pgc-topbar">
+    <button type="button" class="icon-btn" id="pgc-back" title="返回主界面">←</button>
+    <div class="pgc-topbar-main">
+      <span class="pgc-kind" id="pgc-kind">番剧</span>
+      <span class="pgc-topbar-title" id="pgc-topbar-title"></span>
+    </div>
+    <button type="button" class="mini-btn" id="pgc-home" title="返回主菜单（保留下载任务）">🏠 主菜单</button>
+  </div>
+
+  <div class="pgc-hero">
+    <div class="pgc-cover"><img id="pgc-cover" alt="" loading="lazy"></div>
+    <div class="pgc-hero-info">
+      <h1 class="pgc-title" id="pgc-title"></h1>
+      <div class="pgc-meta" id="pgc-meta"></div>
+      <p class="pgc-desc" id="pgc-desc"></p>
+      <div class="pgc-hero-actions">
+        <button type="button" class="mini-btn" id="pgc-play-online" title="在线播放当前选中集">▶ 在线播放</button>
+        <button type="button" class="mini-btn" id="pgc-open-dir" title="打开下载目录">📂 下载目录</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pgc-section-head">
+    <h2 id="pgc-ep-heading">选集下载</h2>
+    <span class="pgc-ep-summary" id="pgc-ep-summary"></span>
+    <div class="pgc-filter" id="pgc-filter" role="group" aria-label="内容筛选">
+      <button type="button" class="pgc-filter-btn active" data-filter="full" aria-pressed="true">正片</button>
+      <button type="button" class="pgc-filter-btn" data-filter="extras" aria-pressed="false">预告 / 花絮</button>
+      <button type="button" class="pgc-filter-btn" data-filter="all" aria-pressed="false">全部</button>
+    </div>
+  </div>
+  <div class="pgc-ep-list" id="pgc-ep-list" role="list"></div>
+  <div class="pgc-empty" id="pgc-ep-empty" hidden>该分类下暂无内容</div>
+
+  <div class="pgc-panel">
+    <div class="pgc-panel-head">
+      <h2>下载设置</h2>
+      <span class="pgc-panel-hint">番剧 / 电影专属选项，普通视频页不受影响</span>
+    </div>
+    <div class="pgc-opt-grid">
+      <div class="opt-row">
+        <label for="pgc-qn">分辨率</label>
+        <select id="pgc-qn"></select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-fps">帧率</label>
+        <select id="pgc-fps">
+          <option value="auto" selected>自动（按片源）</option>
+          <option value="60">优先 60 帧</option>
+        </select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-dr">动态范围</label>
+        <select id="pgc-dr">
+          <option value="auto" selected>自动</option>
+          <option value="hdr">优先 HDR</option>
+          <option value="sdr">仅 SDR</option>
+        </select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-audio">音轨</label>
+        <select id="pgc-audio">
+          <option value="high" selected>AAC 高码率（默认）</option>
+          <option value="std">AAC 标准（省流量）</option>
+        </select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-enc">编码</label>
+        <select id="pgc-enc">
+          <option value="auto" selected>自动（兼容优先）</option>
+          <option value="h264">H.264（最兼容）</option>
+          <option value="h265">H.265（高压缩）</option>
+          <option value="av1">AV1（最高压缩）</option>
+        </select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-fmt">封装</label>
+        <select id="pgc-fmt">
+          <option value="mp4" selected>MP4（通用兼容）</option>
+          <option value="mkv">MKV（保留更多轨道）</option>
+        </select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-threads">线程数</label>
+        <select id="pgc-threads">
+          <option value="4">4 线程（保守）</option>
+          <option value="8" selected>8 线程（推荐）</option>
+          <option value="12">12 线程（极速）</option>
+          <option value="16">16 线程（最大并发）</option>
+        </select>
+      </div>
+      <div class="opt-row">
+        <label for="pgc-clip">片段</label>
+        <input type="text" id="pgc-clip" placeholder="可选：起始-结束，如 00:30-01:15">
+      </div>
+      <div class="opt-row pgc-opt-wide">
+        <label>附带内容</label>
+        <span class="opt-inline">
+          <label class="checkbox-label"><input type="checkbox" id="pgc-danmaku"> 弹幕 XML</label>
+          <label class="checkbox-label"><input type="checkbox" id="pgc-sub"> 字幕 SRT</label>
+        </span>
+      </div>
+    </div>
+    <div class="pgc-note" id="pgc-note" role="status" aria-live="polite"></div>
+  </div>
+
+  <div class="pgc-actionbar">
+    <div class="pgc-selected" id="pgc-selected"></div>
+    <div class="pgc-actionbar-btns">
+      <button type="button" class="mini-btn" id="pgc-download-all">下载全部正片</button>
+      <button type="button" class="dl-btn pgc-dl-btn" id="pgc-download">下载本集</button>
+    </div>
+  </div>
+</section>
+
 <!-- 播放器预览（功能13） -->
 <div class="player-modal" id="player-modal" hidden>
   <div class="player-box">

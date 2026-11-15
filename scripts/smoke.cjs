@@ -163,25 +163,26 @@ const { execFileSync } = require('node:child_process');
     const merged = await page.evaluate(() => window.biliAPI.muxDownload({ token: 'smoke_mux', videoUrls: ['https://test.bilivideo.com/real-video'], audioUrls: ['https://test.bilivideo.com/real-audio'], filename: 'merged.mp4', threads: 4 }));
     assert.equal(merged.ok, true, merged.error);
     execFileSync(ffmpeg, ['-v', 'error', '-i', merged.path, '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], { stdio: 'pipe', windowsHide: true });
-    // 番剧：ep 链接 → PGC 季度解析 → 选集 → 按 PGC 取流下载
+    // 番剧：ep 链接 → PGC 季度解析 → 独立番剧下载页 → 选集 → 按 PGC 取流下载
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep318443');
     await page.locator('#url-input').press('Enter');
-    await page.waitForFunction(() => document.querySelectorAll('.page-chip').length === 3, null, { timeout: 10000 });
-    assert.equal(await page.locator('.page-chip').nth(2).getAttribute('class'), 'page-chip active', '应默认选中链接对应的第 3 集');
+    await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll('#pgc-ep-list .pgc-ep').length === 3, null, { timeout: 10000 });
+    assert.equal(await page.locator('#pgc-kind').innerText(), '番剧下载');
+    assert.equal(await page.locator('#pgc-ep-list .pgc-ep').nth(2).getAttribute('class'), 'pgc-ep active', '应默认选中链接对应的第 3 集');
     // PGC 的 duration 是毫秒：600000ms 必须显示成 10:00，而不是 166 小时
-    assert.match(await page.locator('.page-chip').first().innerText(), /10:00/, '剧集时长应按秒格式化');
-    assert.equal(await page.locator('#v-duration').innerText(), '05:00', '默认选中的第 3 集应显示自己的时长');
+    assert.match(await page.locator('#pgc-ep-list .pgc-ep').first().innerText(), /10:00/, '剧集时长应按秒格式化');
+    assert.match(await page.locator('#pgc-selected').innerText(), /05:00/, '默认选中的第 3 集应显示自己的时长');
 
-    await page.locator('#type-seg [data-type="video"]').click();
     // 切集时旧的分片区间必须失效，否则会按上一集的时间轴去截取
-    await page.locator('#clip-input').fill('00:01-00:02');
-    await page.locator('.page-chip').first().click();
-    assert.equal(await page.locator('#v-duration').innerText(), '10:00', '切集后卡片时长必须跟着变');
-    assert.equal(await page.locator('#clip-input').inputValue(), '', '切集应清空上一集的分片区间');
-    await page.locator('.page-chip').nth(2).click();
+    await page.locator('#pgc-clip').fill('00:01-00:02');
+    await page.locator('#pgc-ep-list .pgc-ep').first().click();
+    assert.match(await page.locator('#pgc-selected').innerText(), /10:00/, '切集后已选时长必须跟着变');
+    assert.equal(await page.locator('#pgc-clip').inputValue(), '', '切集应清空上一集的分片区间');
+    await page.locator('#pgc-ep-list .pgc-ep').nth(2).click();
     // 番剧取流复用上面的真实音视频样本，确保 DASH 合流走真实 FFmpeg 路径
     await application.evaluate((_, media) => { globalThis.smokeMedia = Object.assign(globalThis.smokeMedia || {}, media); }, { '/video': video, '/audio': audio });
-    await page.locator('#dl-btn').click();
+    await page.locator('#pgc-download').click();
     const episodeTask = page.locator('.task-card').last();
     await episodeTask.locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/season') && u.includes('ep_id=318443')), '应使用 PGC 季度接口解析');
@@ -191,57 +192,66 @@ const { execFileSync } = require('node:child_process');
     assert.equal(upstreamUrls.filter(u => u.includes('audio-lo')).length, 0, '不得请求 64k 低档音频');
     // 整季批量：每集都要带上自己的 ep_id，否则只有第一集会走 PGC 取流
     const mp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
-    await page.locator('#btn-all').click();
+    await page.locator('#pgc-download-all').click();
     await page.locator('#batch-panel').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('#batch-start').click();
     await page.waitForFunction(() => /批量下载完成/.test(document.body.innerText), null, { timeout: 60000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length >= mp4Before + 3, '整季批量应下载 3 集');
     assert.equal(new Set(upstreamUrls.filter(u => u.includes('/pgc/player/web/playurl')).map(u => (/ep_id=(\d+)/.exec(u) || [])[1])).size, 3, '三个剧集应分别带自己的 ep_id 取流');
     await page.locator('#batch-back').click();
+    await page.locator('#pgc-back').click();
     // 电影（大会员）：能读出来，但试看片段必须拒绝保存，不能当完整影片交付
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep900001');
     await page.locator('#url-input').press('Enter');
-    await page.waitForFunction(() => /电影/.test(document.body.innerText), null, { timeout: 10000 });
-    assert.match(await page.locator('#v-title').innerText(), /（电影）/);
-    assert.equal(await page.locator('#v-up').innerText(), '哔哩哔哩电影', '电影 UP 名应取 up_info.uname');
-    assert.equal(await page.locator('#v-duration').innerText(), '1:59:42', '电影时长应按毫秒换算');
+    await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await page.locator('#pgc-kind').innerText(), '电影下载');
+    assert.equal(await page.locator('#pgc-title').innerText(), '电影解析测试');
+    assert.match(await page.locator('#pgc-meta').innerText(), /哔哩哔哩电影/, '电影制作方应取 up_info.uname');
+    assert.match(await page.locator('#pgc-selected').innerText(), /1:59:42/, '电影时长应按毫秒换算');
     // 探测阶段就应提示只有试看权限，而不是等用户点下载才失败
-    await page.waitForFunction(() => /试看/.test(document.querySelector('#dl-note').textContent), null, { timeout: 10000 });
+    await page.waitForFunction(() => /试看/.test(document.querySelector('#pgc-note').textContent), null, { timeout: 10000 });
     const movieMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
-    await page.locator('#dl-btn').click();
+    await page.locator('#pgc-download').click();
     const movieTask = page.locator('.task-card').last();
     await movieTask.locator('.task-status.error').waitFor({ timeout: 15000 });
     assert.match(await movieTask.innerText(), /试看|大会员/, '试看片段应明确拒绝并说明原因');
     assert.equal(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length, movieMp4Before, '试看片段不得落盘');
 
     // 电影（免费）：完整读取并保存
+    await page.locator('#pgc-back').click();
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep900002');
     await page.locator('#url-input').press('Enter');
-    await page.waitForFunction(() => /免费电影测试/.test(document.body.innerText), null, { timeout: 10000 });
-    assert.equal((await page.locator('#dl-note').innerText()).includes('试看'), false, '换片后不应残留上一部影片的试看提示');
-    await page.locator('#dl-btn').click();
+    await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await page.locator('#pgc-title').innerText(), '免费电影测试');
+    assert.equal((await page.locator('#pgc-note').innerText()).includes('试看'), false, '换片后不应残留上一部影片的试看提示');
+    await page.locator('#pgc-download').click();
     await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > movieMp4Before, '免费电影应落盘');
 
     // 未开播季度：episodes 为空但 section 有预告，必须能展示并提示，不能停在空白
+    await page.locator('#pgc-back').click();
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ss77001');
     await page.locator('#url-input').press('Enter');
-    await page.waitForFunction(() => /未开播测试/.test(document.querySelector('#v-title').textContent), null, { timeout: 10000 });
-    assert.match(await page.locator('#dl-note').innerText(), /暂无正片/, '未开播季度应提示只有预告 / 花絮');
-    assert.equal(await page.locator('.page-chip').count(), 1, '应回落到 section 里的预告');
-    assert.equal(await page.locator('#btn-all').isVisible(), false, '只有一条预告时不应显示下载全部');
+    await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
+    await page.waitForFunction(() => /暂无正片/.test(document.getElementById('pgc-note').textContent), null, { timeout: 10000 });
+    assert.equal(await page.locator('#pgc-title').innerText(), '未开播测试');
+    assert.equal(await page.locator('#pgc-ep-list .pgc-ep').count(), 1, '应回落到 section 里的预告');
+    assert.equal(await page.locator('#pgc-download-all').isVisible(), false, '只有一条预告时不应显示下载全部');
 
     // 媒体页（md…）：不含剧集，需 media → season 两级解析；单集电影不该出现「下载全部」
     const mdMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
+    await page.locator('#pgc-back').click();
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/media/md22630575');
     await page.locator('#url-input').press('Enter');
-    await page.waitForFunction(() => /免费电影测试/.test(document.querySelector('#v-title').textContent), null, { timeout: 10000 });
-    assert.equal(await page.locator('#btn-all').isVisible(), false, '单集电影不应显示下载全部');
+    await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await page.locator('#pgc-title').innerText(), '免费电影测试');
+    assert.equal(await page.locator('#pgc-download-all').isVisible(), false, '单集电影不应显示下载全部');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/media') && u.includes('media_id=22630575')), '应通过 media 接口解析 md 页');
-    await page.locator('#dl-btn').click();
+    await page.locator('#pgc-download').click();
     await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > mdMp4Before, 'md 页应能正常下载');
 
+    await page.locator('#pgc-back').click();
     // 充电专属：解析后明确提示，取流被拒时给出可理解的失败原因
     await page.locator('#url-input').fill('BV1upower1x7');
     await page.locator('#url-input').press('Enter');

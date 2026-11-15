@@ -128,6 +128,22 @@
   var batchActive = false;
   var batchData = null;
   var batchStarted = false;
+  // 番剧 / 电影独立下载页
+  var pgcPage = $('pgc-page');
+  var pgcQn = $('pgc-qn');
+  var pgcFps = $('pgc-fps');
+  var pgcDr = $('pgc-dr');
+  var pgcAudio = $('pgc-audio');
+  var pgcEnc = $('pgc-enc');
+  var pgcFmt = $('pgc-fmt');
+  var pgcThread = $('pgc-threads');
+  var pgcClip = $('pgc-clip');
+  var pgcDanmaku = $('pgc-danmaku');
+  var pgcSub = $('pgc-sub');
+  var pgcFilterEl = $('pgc-filter');
+  var pgcActiveKey = '';
+  var pgcFilterMode = 'full';
+  var pgcReturnAfterBatch = false;
   var playerClose = $('player-close');
   var playerTitle = $('player-title');
   // v1.4：合集/收藏夹视频表格列表 + 并发调度 + 主菜单
@@ -347,6 +363,11 @@
   function setNote(cls, text) {
     dlNote.className = cls || '';
     dlNote.textContent = text || '';
+    // PGC 页面替换了旧详情卡：提示也要同步到独立页面，避免「试看 / 未开播」只写在隐藏节点里
+    if (pgcPage && !pgcPage.hidden) {
+      var pn = document.getElementById('pgc-note');
+      if (pn) { pn.className = 'pgc-note' + (cls ? ' ' + cls : ''); pn.textContent = text || ''; }
+    }
   }
 
   /* ---------- 全局错误兜底：页面里任何未捕获异常都要留下痕迹 ---------- */
@@ -621,7 +642,25 @@
       stat: { view: stat.views, danmaku: stat.danmakus, like: stat.likes, reply: stat.reply },
       pubdate: pgcPubdate(result),
       onlySection: onlySection,
-      episodes: trimTrailers(eps.map(mapPgcEpisode), keepEpId)
+      episodes: trimTrailers(eps.map(mapPgcEpisode), keepEpId),
+      // 预告 / PV / 花絮单独成组：正片列表保持干净，独立页面可切换查看
+      extras: (result.section || []).reduce(function (all, sec) {
+        var list = (sec && sec.episodes) || [];
+        list.forEach(function (ep, i) {
+          var item = mapPgcEpisode(ep, i);
+          item.isExtra = true;
+          item.sectionTitle = (sec && sec.title) || '预告 / 花絮';
+          all.push(item);
+        });
+        return all;
+      }, []),
+      rating: result.rating || null,
+      desc: result.desc || result.evaluate || '',
+      areas: result.areas || [],
+      styles: result.styles || [],
+      publish: result.publish || null,
+      statusText: (result.status || ''),
+      total: result.total || 0
     };
   }
 
@@ -870,6 +909,15 @@
       up: data.up || (data.up_info ? (data.up_info.uname || data.up_info.name) : ''),
       mediaType: data.mediaType,
       isMovie: !!data.isMovie,
+      onlySection: !!data.onlySection,
+      extras: data.extras || [],
+      rating: data.rating || null,
+      desc: data.desc || '',
+      areas: data.areas || [],
+      styles: data.styles || [],
+      publish: data.publish || null,
+      statusText: data.statusText || '',
+      totalCount: data.total || 0,
       duration: (episodes[0] && episodes[0].duration) || 0,
       stat: data.stat || {},
       pubdate: 0,
@@ -877,7 +925,10 @@
       pageIndex: 0
     };
     current.title = current.title + (data.onlySection ? '（暂无正片）' : data.isMovie && episodes.length === 1 ? '（电影）' : '（' + episodes.length + ' 集）');
-    if (data.onlySection) setNote('warn', '该季度暂无正片（可能尚未开播），下面列出的是预告 / 花絮，可单独下载');
+    if (data.onlySection) {
+      setNote('warn', '该季度暂无正片（可能尚未开播），下面列出的是预告 / 花絮，可单独下载');
+      pgcFilterMode = 'extras';
+    }
     renderCard();
     // 单集作品没有「批量」可言；只有预告/花絮时也不算剧集，不给批量
     if (btnAll) btnAll.hidden = data.onlySection || episodes.length < 2;
@@ -901,7 +952,341 @@
       pagesList.appendChild(chip);
     });
     selectEpisode(Math.max(0, Math.min(Number(initialIndex) || 0, episodes.length - 1)), true);
+    pgcFilterMode = data.onlySection ? 'extras' : 'full';
+    pgcActiveKey = data.onlySection ? 'extra:0' : ('full:' + Math.max(0, Math.min(Number(initialIndex) || 0, episodes.length - 1)));
+    showPgcPage();
+    // 清晰度探测是异步的：先展示全档，探测回来后按实际可用来更新（不重置用户已选）
+    probeAcceptQuality().then(function () { fillPgcQuality(); });
   }
+
+  /* ---------- 番剧 / 电影独立下载页 ---------- */
+  function showPgcPage() {
+    if (!current || current.kind !== 'bangumi' || !pgcPage) return;
+    renderPgcPage();
+    pgcPage.hidden = false;
+    if (mainContainer) mainContainer.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    if (historyPanel) historyPanel.hidden = true;
+    if (queuePanel) queuePanel.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (listPanel) listPanel.hidden = true;
+    document.body.classList.add('overlay-active', 'pgc-open');
+  }
+  function hidePgcPage(keepResult) {
+    if (pgcPage) pgcPage.hidden = true;
+    document.body.classList.remove('overlay-active', 'pgc-open');
+    if (mainContainer) mainContainer.hidden = false;
+    if (keepResult === false && resultEl) resultEl.hidden = true;
+  }
+  function renderPgcPage() {
+    if (!current || current.kind !== 'bangumi') return;
+    var isMovie = !!current.isMovie;
+    var kindEl = $('pgc-kind');
+    if (kindEl) {
+      kindEl.textContent = isMovie ? '电影下载' : '番剧下载';
+      kindEl.classList.toggle('movie', isMovie);
+    }
+    var rawTitle = String(current.title || (isMovie ? '电影' : '番剧')).replace(/（(?:电影|\d+\s*集|暂无正片)）\s*$/, '');
+    var topTitle = $('pgc-topbar-title');
+    if (topTitle) topTitle.textContent = rawTitle;
+    var titleEl = $('pgc-title');
+    if (titleEl) titleEl.textContent = rawTitle;
+    var cover = $('pgc-cover');
+    if (cover) {
+      cover.src = fixCover(current.pic || '');
+      cover.alt = (current.title || '') + ' 封面';
+      cover.onerror = function () { cover.style.visibility = 'hidden'; };
+    }
+    var desc = $('pgc-desc');
+    if (desc) {
+      desc.textContent = current.desc || (isMovie ? '暂无简介' : '暂无简介');
+      desc.title = current.desc || '';
+    }
+    renderPgcMeta();
+    renderPgcEpisodes();
+    renderPgcSelected();
+    fillPgcQuality();
+    var allBtn = $('pgc-download-all');
+    if (allBtn) {
+      var fullCount = (current.episodes || []).length;
+      allBtn.hidden = isMovie || fullCount < 2;
+      allBtn.textContent = isMovie ? '下载全部正片' : ('下载全部正片（' + fullCount + ' 集）');
+    }
+    var filterWrap = pgcFilterEl;
+    if (filterWrap) {
+      var hasExtras = (current.extras || []).length > 0;
+      filterWrap.querySelectorAll('.pgc-filter-btn').forEach(function (b) {
+        var f = b.getAttribute('data-filter');
+        b.hidden = (f === 'extras' || f === 'all') ? !hasExtras : false;
+      });
+    }
+    if (current.onlySection) setPgcNote('warn', '该季度暂无正片（可能尚未开播），下面列出的是预告 / 花絮，可单独下载');
+    else setPgcNote('ok', pgcSummaryText());
+  }
+  function renderPgcMeta() {
+    var meta = $('pgc-meta');
+    if (!meta) return;
+    var chips = [];
+    var r = current.rating || {};
+    if (r.score) chips.push('<span class="pgc-chip score">★ <strong>' + escHtml(String(r.score)) + '</strong>' + (r.count ? ' · ' + Number(r.count).toLocaleString() + ' 人评分' : '') + '</span>');
+    chips.push('<span class="pgc-chip">' + (current.isMovie ? '电影' : '番剧') + '</span>');
+    if (current.up) chips.push('<span class="pgc-chip">' + escHtml(current.up) + '</span>');
+    var areas = (current.areas || []).map(function (a) { return a && a.name; }).filter(Boolean);
+    if (areas.length) chips.push('<span class="pgc-chip">' + escHtml(areas.join(' / ')) + '</span>');
+    var styles = (current.styles || []).filter(Boolean);
+    if (styles.length) chips.push('<span class="pgc-chip">' + escHtml(styles.slice(0, 4).join(' · ')) + '</span>');
+    var p = current.publish || {};
+    var pubText = String(p.pub_time || p.pub_time_show || '');
+    if (/^\d{4}/.test(pubText)) chips.push('<span class="pgc-chip">' + escHtml(pubText.slice(0, 10)) + '</span>');
+    var finished = p.is_finish === 1;
+    if (p.is_started || p.is_finish) {
+      chips.push('<span class="pgc-chip">' + (current.isMovie ? (finished ? '已上映' : '即将上映') : (finished ? '已完结' : '连载中')) + '</span>');
+    }
+    var eps = (current.episodes || []).length;
+    var extras = (current.extras || []).length;
+    if (!current.isMovie && eps) chips.push('<span class="pgc-chip">正片 <strong>' + eps + '</strong> 集</span>');
+    if (extras) chips.push('<span class="pgc-chip">预告花絮 <strong>' + extras + '</strong> 条</span>');
+    if (current.duration) chips.push('<span class="pgc-chip">本集 ' + escHtml(fmtDur(current.duration)) + '</span>');
+    meta.innerHTML = chips.join('');
+  }
+  function pgcEpisodeName(ep, i) {
+    var t = String((ep && ep.title) || '').trim();
+    if (/第\s*.+?[话集]/.test(t)) return t;
+    if (t) return t;
+    return current.isMovie ? '正片' : ('第 ' + (i + 1) + ' 话');
+  }
+  function renderPgcEpisodes() {
+    var listEl = $('pgc-ep-list');
+    var emptyEl = $('pgc-ep-empty');
+    if (!listEl) return;
+    if (pgcFilterEl) {
+      pgcFilterEl.querySelectorAll('.pgc-filter-btn').forEach(function (b) {
+        var on = b.getAttribute('data-filter') === pgcFilterMode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    }
+    var full = (current.episodes || []).map(function (ep, i) { return { ep: ep, key: 'full:' + i, type: 'full', index: i }; });
+    var extras = (current.extras || []).map(function (ep, i) { return { ep: ep, key: 'extra:' + i, type: 'extra', index: i }; });
+    var rows = pgcFilterMode === 'extras' ? extras : pgcFilterMode === 'all' ? full.concat(extras) : full;
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.hidden = rows.length > 0;
+    rows.forEach(function (row) {
+      var ep = row.ep;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pgc-ep' + (row.key === pgcActiveKey ? ' active' : '');
+      btn.setAttribute('aria-pressed', row.key === pgcActiveKey ? 'true' : 'false');
+      var name = row.type === 'extra' ? (ep.sectionTitle + ' · ' + pgcEpisodeName(ep, row.index)) : pgcEpisodeName(ep, row.index);
+      var badge = '';
+      if (row.type === 'extra') badge = '<span class="pgc-ep-badge">预告花絮</span>';
+      else if (ep.badge) badge = '<span class="pgc-ep-badge vip">' + escHtml(ep.badge) + '</span>';
+      btn.innerHTML = '<span class="pgc-ep-top"><span class="pgc-ep-label">' + escHtml(name) + '</span>' + badge +
+        '<span class="pgc-ep-dur">' + escHtml(fmtDur(ep.duration || 0)) + '</span></span>' +
+        (ep.long_title ? '<span class="pgc-ep-sub">' + escHtml(ep.long_title) + '</span>' : '<span class="pgc-ep-sub">' + escHtml(row.type === 'extra' ? '单独下载' : (ep.badge || '正片')) + '</span>');
+      btn.addEventListener('click', function () { selectPgcItem(row.type, row.index); });
+      listEl.appendChild(btn);
+    });
+    var summary = $('pgc-ep-summary');
+    if (summary) {
+      var fullN = full.length;
+      var extraN = extras.length;
+      summary.textContent = pgcFilterMode === 'extras' ? (extraN + ' 条预告 / 花絮') : pgcFilterMode === 'all' ? ('共 ' + (fullN + extraN) + ' 条内容') : (current.isMovie ? '电影正片' : ('共 ' + fullN + ' 集正片'));
+    }
+  }
+  function selectPgcItem(type, index) {
+    if (!current) return;
+    if (type === 'full') {
+      if (!current.episodes || !current.episodes[index]) return;
+      pgcActiveKey = 'full:' + index;
+      current.isExtra = false;
+      if (pgcClip) pgcClip.value = '';   // 切集后旧片段区间必须失效
+      selectEpisode(index, true);
+    } else {
+      var ep = (current.extras || [])[index];
+      if (!ep) return;
+      pgcActiveKey = 'extra:' + index;
+      current.isExtra = true;
+      current.pageIndex = -1;
+      current.bvid = ep.bvid;
+      current.aid = ep.aid;
+      current.cid = ep.cid;
+      current.epId = ep.ep_id || ep.id;
+      current.duration = ep.duration || 0;
+      if (pgcClip) pgcClip.value = '';
+      probeAcceptQuality().then(fillPgcQuality);
+    }
+    renderPgcEpisodes();
+    renderPgcSelected();
+    setPgcNote('ok', pgcSummaryText());
+  }
+  function pgcSelectedItem() {
+    if (!current) return null;
+    if (current.isExtra) {
+      var ei = Number(pgcActiveKey.split(':')[1]);
+      return (current.extras || [])[ei] || null;
+    }
+    var fi = Number(pgcActiveKey.split(':')[1]);
+    return (current.episodes || [])[fi] || null;
+  }
+  function renderPgcSelected() {
+    var el = $('pgc-selected');
+    if (!el) return;
+    var ep = pgcSelectedItem();
+    if (!ep) { el.textContent = '尚未选择要下载的内容'; return; }
+    var name = current.isExtra ? (ep.sectionTitle + ' · ' + pgcEpisodeName(ep, 0)) : pgcEpisodeName(ep, Number(pgcActiveKey.split(':')[1]));
+    el.innerHTML = '已选：<strong>' + escHtml(name) + '</strong> · ' + escHtml(fmtDur(ep.duration || current.duration || 0));
+  }
+  function pgcSummaryText() {
+    var eps = (current.episodes || []).length;
+    var extras = (current.extras || []).length;
+    if (current.isMovie) return '电影正片 1 部' + (extras ? ' · 另有 ' + extras + ' 条预告 / 花絮，可切换后单独下载' : '');
+    return '番剧共 ' + eps + ' 集正片' + (extras ? ' · 另有 ' + extras + ' 条预告 / 花絮' : '');
+  }
+  function setPgcNote(kind, text) {
+    var el = $('pgc-note');
+    if (!el) return;
+    el.className = 'pgc-note' + (kind ? ' ' + kind : '');
+    el.textContent = text || '';
+  }
+  function fillPgcQuality() {
+    if (!pgcQn) return;
+    var prev = pgcQn.value;
+    var aq = (current && Array.isArray(current.acceptQuality) && current.acceptQuality.length) ? current.acceptQuality : null;
+    pgcQn.innerHTML = '';
+    PGC_QNS.forEach(function (q) {
+      var o = document.createElement('option');
+      o.value = String(q[0]);
+      var miss = aq && aq.indexOf(q[0]) < 0;
+      o.textContent = q[1] + (miss ? '（片源 / 账号不支持）' : '');
+      o.disabled = !!miss;
+      pgcQn.appendChild(o);
+    });
+    var pick = prev && pgcQn.querySelector('option[value="' + prev + '"]:not([disabled])');
+    if (pick) pgcQn.value = prev;
+    else pickPgcPreference(true);
+  }
+  function pgcEnabledQn() {
+    if (!pgcQn) return [];
+    return Array.prototype.slice.call(pgcQn.options).filter(function (o) { return !o.disabled; });
+  }
+  function pickPgcPreference(initial) {
+    if (!pgcQn) return;
+    var opts = pgcEnabledQn();
+    if (!opts.length) return;
+    var has = function (qn) { return opts.some(function (o) { return Number(o.value) === qn; }); };
+    var fps = pgcFps ? pgcFps.value : 'auto';
+    var dr = pgcDr ? pgcDr.value : 'auto';
+    var wantHdr = dr === 'hdr';
+    var notes = [];
+    if (wantHdr && !has(125)) {
+      notes.push('当前片源或账号没有 HDR 档，已回退到最高可用 SDR 清晰度');
+      wantHdr = false;
+    } else if (wantHdr) {
+      pgcQn.value = '125';
+      notes.push('HDR 为 4K HEVC 10bit，整片体积明显大于普通 4K');
+    }
+    if (fps === '60') {
+      if (has(116) || has(74)) {
+        var sixty = has(116) ? 116 : 74;
+        if (wantHdr && has(125)) {
+          pgcQn.value = '125';
+          notes.push('HDR 片源为 24 帧，已优先 HDR；60 帧档需关闭 HDR 后选择');
+        } else {
+          pgcQn.value = String(sixty);
+        }
+      } else {
+        notes.push('该片源没有 60 帧档，已按片源帧率选择');
+        fps = 'auto';
+      }
+    }
+    if (dr === 'sdr' && Number(pgcQn.value) === 125) {
+      pgcQn.value = has(120) ? '120' : has(112) ? '112' : String(opts[0].value);
+    }
+    if (initial || (fps !== '60' && !wantHdr)) {
+      if (!pgcQn.value || pgcQn.value === '') {
+        pgcQn.value = has(112) ? '112' : has(120) ? '120' : String(opts[0].value);
+      } else if (initial) {
+        pgcQn.value = has(112) ? '112' : has(120) ? '120' : String(opts[0].value);
+      }
+    }
+    if (notes.length) setPgcNote('warn', notes.join('；'));
+    else setPgcNote('ok', pgcQualityHint());
+  }
+  function pgcQualityHint() {
+    var qn = Number(pgcQn && pgcQn.value);
+    var label = (PGC_QNS.filter(function (q) { return q[0] === qn; })[0] || [])[1] || ('qn ' + qn);
+    if (qn === 125) return '已选 ' + label + '：HEVC 10bit / BT.2020，文件体积明显大于 4K SDR';
+    if (qn === 120) return '已选 ' + label + '：整部电影体积可能很大，建议先试片段';
+    if (qn === 116 || qn === 74) return '已选 ' + label + '：60 帧优先';
+    return '已选 ' + label + ' · 音轨 ' + (pgcAudio && pgcAudio.value === 'std' ? 'AAC 标准（约 132kbps）' : 'AAC 高码率（约 192kbps）');
+  }
+  function syncPgcToLegacy() {
+    if (!current) return;
+    if (pgcQn && qnSelect) {
+      var q = pgcQn.value;
+      if (qnSelect.querySelector('option[value="' + q + '"]')) qnSelect.value = q;
+    }
+    if (encSelect && pgcEnc) encSelect.value = pgcEnc.value;
+    if (fmtSelect && pgcFmt) fmtSelect.value = pgcFmt.value;
+    if (threadSelect && pgcThread) threadSelect.value = pgcThread.value;
+    if (clipInput && pgcClip) clipInput.value = pgcClip.value;
+    if (extraDanmaku && pgcDanmaku) extraDanmaku.checked = pgcDanmaku.checked;
+    if (extraSub && pgcSub) extraSub.checked = pgcSub.checked;
+    if (typeSeg) {
+      typeSeg.querySelectorAll('.seg-btn').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-type') === 'video');
+        b.setAttribute('aria-selected', b.getAttribute('data-type') === 'video' ? 'true' : 'false');
+      });
+    }
+  }
+  function startPgcDownload() {
+    if (!current) return;
+    syncPgcToLegacy();
+    startDownload();
+    setPgcNote('ok', '已加入下载队列：' + (pgcSelectedItem() ? '当前选中内容' : '当前视频') + '，可在下载任务列表查看进度');
+  }
+  if (pgcFilterEl) {
+    pgcFilterEl.addEventListener('click', function (ev) {
+      var b = ev.target.closest('.pgc-filter-btn');
+      if (!b || b.hidden) return;
+      pgcFilterMode = b.getAttribute('data-filter') || 'full';
+      pgcFilterEl.querySelectorAll('.pgc-filter-btn').forEach(function (x) {
+        var on = x === b;
+        x.classList.toggle('active', on);
+        x.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      renderPgcEpisodes();
+    });
+  }
+  if (pgcQn) pgcQn.addEventListener('change', function () { setPgcNote('ok', pgcQualityHint()); });
+  if (pgcFps) pgcFps.addEventListener('change', function () { pickPgcPreference(false); });
+  if (pgcDr) pgcDr.addEventListener('change', function () { pickPgcPreference(false); });
+  if (pgcAudio) pgcAudio.addEventListener('change', function () { setPgcNote('ok', pgcQualityHint()); });
+  var pgcBackBtn = $('pgc-back');
+  if (pgcBackBtn) pgcBackBtn.addEventListener('click', function () {
+    hidePgcPage(true);
+    if (resultEl) resultEl.hidden = false;
+  });
+  var pgcHomeBtn = $('pgc-home');
+  if (pgcHomeBtn) pgcHomeBtn.addEventListener('click', goHome);
+  var pgcDlBtn = $('pgc-download');
+  if (pgcDlBtn) pgcDlBtn.addEventListener('click', startPgcDownload);
+  var pgcAllBtn = $('pgc-download-all');
+  if (pgcAllBtn) pgcAllBtn.addEventListener('click', function () {
+    if (!current) return;
+    syncPgcToLegacy();
+    pgcReturnAfterBatch = true;
+    if (pgcPage) pgcPage.hidden = true;
+    openBatchPanel();
+  });
+  var pgcPlayBtn = $('pgc-play-online');
+  if (pgcPlayBtn) pgcPlayBtn.addEventListener('click', playOnlineVideo);
+  var pgcDirBtn = $('pgc-open-dir');
+  if (pgcDirBtn) pgcDirBtn.addEventListener('click', function () {
+    if (!window.biliAPI || !window.biliAPI.openDownloadDir) return;
+    window.biliAPI.openDownloadDir().catch(function () { });
+  });
 
   function selectEpisode(idx, silent) {
     var ep = current.episodes[idx];
@@ -920,7 +1305,10 @@
     var chips = pagesList.children;
     for (var i = 0; i < chips.length; i++) chips[i].classList.toggle('active', i === idx);
     if (!silent) setNote('ok', '已切换到第 ' + (idx + 1) + ' 集');
-    probeAcceptQuality().then(fillQnOptions);
+    probeAcceptQuality().then(function () {
+      fillQnOptions();
+      if (pgcPage && !pgcPage.hidden) fillPgcQuality();
+    });
   }
 
   function renderCard() {
@@ -1532,7 +1920,9 @@
 
   /* ---------- 清晰度档位（原视频无该分辨率 → 灰显禁用） ---------- */
   function probeAcceptQuality() {
-    return fetchPlayurl(16).then(function (pd) {
+    // PGC 的 HDR / 60 帧档只在 fnval=4048 的返回里出现；普通视频沿用轻量 16
+    var fnval = (current && current.kind === 'bangumi') ? 4048 : 16;
+    return fetchPlayurl(fnval, 16).then(function (pd) {
       current.acceptQuality = (pd && pd.accept_quality) || [];
       current.acceptDescription = (pd && pd.accept_description) || [];
       current.previewOnly = !!(pd && pd.is_preview === 1);
@@ -1551,7 +1941,8 @@
     var aq = (current && Array.isArray(current.acceptQuality) && current.acceptQuality.length) ? current.acceptQuality : null;
     var prev = qnSelect.value;
     qnSelect.innerHTML = '';
-    QNS.forEach(function (q) {
+    var table = (current && current.kind === 'bangumi') ? PGC_QNS : QNS;
+    table.forEach(function (q) {
       var o = document.createElement('option');
       o.value = q[0];
       var miss = aq && aq.indexOf(q[0]) < 0;
@@ -1878,9 +2269,9 @@
   function saveDlCache() {
     try { localStorage.setItem('bili_dl_cache', JSON.stringify(dlCache)); } catch (e) { }
   }
-  function dlCacheKey(bvid, cid, fnval, qn, enc) {
+  function dlCacheKey(bvid, cid, fnval, qn, enc, audioPref) {
     // 缓存键含登录 UID：未登录时缓存的低清直链，登录后不会复用（反之亦然）；编码偏好不同时缓存隔离
-    return bvid + ':' + cid + ':' + fnval + ':' + (qn || 0) + ':' + (enc || '') + ':' + (currentUid || (loginLogged ? 'L' : ''));
+    return bvid + ':' + cid + ':' + fnval + ':' + (qn || 0) + ':' + (enc || '') + ':' + (audioPref || 'high') + ':' + (currentUid || (loginLogged ? 'L' : ''));
   }
   function getDlCache(key) {
     var e = dlCache[key];
@@ -2815,7 +3206,7 @@
     var t = {
       id: taskSeq,
       source: JSON.parse(JSON.stringify(current)),
-      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: fmtSelect ? fmtSelect.value : 'mp4', clip: clipInput ? clipInput.value : '', af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku ? extraDanmaku.checked : false, subtitle: extraSub ? extraSub.checked : false },
+      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: fmtSelect ? fmtSelect.value : 'mp4', clip: clipInput ? clipInput.value : '', af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku ? extraDanmaku.checked : false, subtitle: extraSub ? extraSub.checked : false, audioPref: (current && current.kind === 'bangumi' && $('pgc-audio')) ? $('pgc-audio').value : 'high' },
       name: name,
       badge: badge,
       status: 'running',
@@ -3097,7 +3488,15 @@
     var segBtn = typeSeg.querySelector('.seg-btn.active');
     var type = segBtn ? segBtn.dataset.type : 'video';
     var page = current.pages && current.pages[current.pageIndex];
-    var baseName = safeName(current.title) + (page && current.pages.length > 1 ? ' [P' + page.page + ']' : '');
+    var pgcLabel = '';
+    if (current.kind === 'bangumi' && pgcPage && !pgcPage.hidden) {
+      var selected = pgcSelectedItem();
+      if (selected) {
+        var ti = Number(pgcActiveKey.split(':')[1]);
+        pgcLabel = ' ' + (current.isExtra ? (selected.sectionTitle + ' · ') : '') + pgcEpisodeName(selected, ti);
+      }
+    }
+    var baseName = safeName(current.title) + pgcLabel + (page && current.pages.length > 1 ? ' [P' + page.page + ']' : '');
     var t;
     if (type === 'video') {
       t = createTask(baseName + '（视频）', '视频');
@@ -3105,6 +3504,7 @@
       t = createTask(baseName + '（音频）', '音频');
     }
     t.type = type;
+    if (pgcLabel) t._part = pgcLabel;   // 番剧 / 电影：文件名带上集名或预告标题，避免同剧互相覆盖
     var run = function () {
       queueTask(t, function () {
         if (type === 'video') downloadVideo(t);
@@ -3128,7 +3528,7 @@
   }
 
   /** 从 DASH 结果中选择视频档（≤目标 qn 的最高档）与最佳音频档 */
-  function pickDash(data, qn, encPref) {
+  function pickDash(data, qn, encPref, audioPref) {
     var vids = (data.dash && data.dash.video) || [];
     var auds = (data.dash && data.dash.audio) || [];
     if (!vids.length) return null;
@@ -3169,6 +3569,11 @@
     var aScore = function (item) {
       var id = item && item.id;
       var isAac = id === 30216 || id === 30232 || id === 30280;
+      if (audioPref === 'std') {
+        // 标准音轨：优先 132k 的 30232；没有时退到 64k，最后才用 192k
+        var stdRank = id === 30232 ? 2e9 : id === 30216 ? 1e9 : 0;
+        return (isAac ? 1e9 : 0) + stdRank;
+      }
       return (isAac ? 1e9 : 0) + (Number(item && item.bandwidth) || 0);
     };
     for (var j = 0; j < auds.length; j++) {
@@ -3229,7 +3634,7 @@
 
     // 高清（>480P）仅存在于 DASH 纯视频流 + 独立音频流；客户端内置 ffmpeg 时可合并下载
     if (muxReady) {
-      var dashKey = dlCacheKey(current.bvid, current.cid, 4048, qn, encPref);
+      var dashKey = dlCacheKey(current.bvid, current.cid, 4048, qn, encPref, task.settings.audioPref);
       var dCached = getDlCache(dashKey);
       var dashPromise;
       if (dCached && dCached.videoUrl) {
@@ -3243,7 +3648,7 @@
         setTaskStatus(task, 'running', '正在获取高清下载地址…');
         dashPromise = fetchPlayurl(4048, qn, current).then(function (data) {
           if (task.cancelled) throw new Error('已取消');
-          var pick = pickDash(data, qn, encPref);
+          var pick = pickDash(data, qn, encPref, task.settings.audioPref);
           if (!pick || !pick.video || !pick.video.baseUrl) throw new Error('未获取到 DASH 视频流');
           var vUrl = pick.video.baseUrl || (pick.video.backupUrl && pick.video.backupUrl[0]);
           if (!vUrl) throw new Error('DASH 视频流地址为空');
@@ -3716,7 +4121,7 @@
       // 已解析过视频时，清晰度列表是按旧账号探出来的：立即重探，否则扫码登录后
       // 下拉里仍然是匿名档位，用户看不到刚解锁的 1080P / 高码率
       if (current && current.episodes && current.pageIndex >= 0 && current.episodes[current.pageIndex]) {
-        probeAcceptQuality().then(fillQnOptions).catch(function () { });
+        probeAcceptQuality().then(function () { fillQnOptions(); if (pgcPage && !pgcPage.hidden) fillPgcQuality(); }).catch(function () { });
       }
     }
     currentUid = uid;
@@ -3914,6 +4319,8 @@
   if (IS_ANDROID && optEnc) optEnc.hidden = true;
 
   var QNS = [[120, '4K 超清'], [112, '1080P 高码率'], [80, '1080P 高清'], [64, '720P 高清'], [32, '480P 清晰'], [16, '360P 流畅']];
+  // PGC 专属扩展档：HDR / 60 帧只在番剧 / 电影页展示
+  var PGC_QNS = [[125, '真彩 HDR'], [120, '4K 超清'], [116, '1080P 60帧'], [112, '1080P 高码率'], [80, '1080P 高清'], [74, '720P 60帧'], [64, '720P 高清'], [32, '480P 清晰'], [16, '360P 流畅']];
   fillQnOptions();
 
   dlBtn.addEventListener('click', startDownload);
@@ -3939,13 +4346,21 @@
   // 设置面板
   var prevView = 'main';   // 打开面板前所在界面（main/list/batch/detail），关闭后恢复
   function capturePrevView() {
-    if (mainContainer && !mainContainer.hidden) prevView = 'main';
+    if (pgcPage && !pgcPage.hidden) prevView = 'pgc';
+    else if (mainContainer && !mainContainer.hidden) prevView = 'main';
     else if (listPanel && !listPanel.hidden) prevView = 'list';
     else if (batchPanel && !batchPanel.hidden) prevView = 'batch';
     else if (resultEl && !resultEl.hidden) prevView = 'detail';
     else prevView = 'main';
   }
   function restorePrevView() {
+    if (prevView === 'pgc' && pgcPage) {
+      pgcPage.hidden = false;
+      document.body.classList.add('pgc-open');
+      if (mainContainer) mainContainer.hidden = true;
+      if (resultEl) resultEl.hidden = true;
+      return;
+    }
     if (prevView === 'list') {
       if (listPanel) listPanel.hidden = false;
       if (typeof renderListTable === 'function') renderListTable();
@@ -3968,6 +4383,7 @@
     if (batchPanel) batchPanel.hidden = true;
     if (resultEl) resultEl.hidden = true;
     if (mainContainer) mainContainer.hidden = true;
+    if (pgcPage) pgcPage.hidden = true;
     document.body.classList.remove('overlay-active');
     refreshLoginState();
     updateDlCacheCount();
@@ -4466,8 +4882,13 @@
   }
   function closeBatchPanel() {
     batchPanel.hidden = true;
-    if (mainContainer) mainContainer.hidden = false;
     document.body.classList.remove('overlay-active');
+    if (pgcReturnAfterBatch && pgcPage && current && current.kind === 'bangumi') {
+      pgcReturnAfterBatch = false;
+      showPgcPage();
+      return;
+    }
+    if (mainContainer) mainContainer.hidden = false;
   }
   function renderBatchList(states) {
     if (!batchList) return;
@@ -4649,6 +5070,11 @@
 
   /* ---------- v1.4：返回主菜单（保留本次下载历史） ---------- */
   function goHome() {
+    if (pgcPage) pgcPage.hidden = true;
+    document.body.classList.remove('pgc-open');
+    pgcReturnAfterBatch = false;
+    pgcActiveKey = '';
+    pgcFilterMode = 'full';
     if (listPanel) listPanel.hidden = true;
     if (listPager) listPager.hidden = true;
     if (batchPanel) batchPanel.hidden = true;
