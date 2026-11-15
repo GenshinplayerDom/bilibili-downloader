@@ -3694,6 +3694,11 @@
       // 登录 / 退出切换：清空下载地址缓存，避免复用旧账号（或未登录）的低清直链
       clearDlCache();
       updateDlCacheCount();
+      // 已解析过视频时，清晰度列表是按旧账号探出来的：立即重探，否则扫码登录后
+      // 下拉里仍然是匿名档位，用户看不到刚解锁的 1080P / 高码率
+      if (current && current.episodes && current.pageIndex >= 0 && current.episodes[current.pageIndex]) {
+        probeAcceptQuality().then(fillQnOptions).catch(function () { });
+      }
     }
     currentUid = uid;
     if (loginStateEl) {
@@ -3743,7 +3748,7 @@
         loginBtn.disabled = false;
         if (res && res.ok) {
           loginNote.className = 'set-note';
-          loginNote.textContent = '✅ 登录成功（UID ' + res.uid + '），已解锁更高清晰度；旧下载地址缓存已清除，请重新选择清晰度下载';
+          loginNote.textContent = '✅ 登录成功（UID ' + res.uid + '），清晰度列表已刷新，重新选择档位即可下载';
           refreshLoginState();
         } else {
           loginNote.className = 'set-note';
