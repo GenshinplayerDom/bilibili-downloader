@@ -962,6 +962,7 @@
   /* ---------- 番剧 / 电影独立下载页 ---------- */
   function showPgcPage() {
     if (!current || current.kind !== 'bangumi' || !pgcPage) return;
+    pgcApplyPlatformLimits();
     renderPgcPage();
     pgcPage.hidden = false;
     if (mainContainer) mainContainer.hidden = true;
@@ -971,6 +972,14 @@
     if (batchPanel) batchPanel.hidden = true;
     if (listPanel) listPanel.hidden = true;
     document.body.classList.add('overlay-active', 'pgc-open');
+  }
+  function pgcApplyPlatformLimits() {
+    if (!IS_ANDROID) return;
+    // Android 走系统直链下载，没有 4K/HDR 合流、片段裁剪和附带文件能力
+    ['pgc-opt-fps', 'pgc-opt-dr', 'pgc-opt-audio', 'pgc-opt-enc', 'pgc-opt-fmt', 'pgc-opt-threads', 'pgc-opt-clip', 'pgc-opt-extras'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.hidden = true;
+    });
   }
   function hidePgcPage(keepResult) {
     if (pgcPage) pgcPage.hidden = true;
@@ -1020,7 +1029,8 @@
         b.hidden = (f === 'extras' || f === 'all') ? !hasExtras : false;
       });
     }
-    if (current.onlySection) setPgcNote('warn', '该季度暂无正片（可能尚未开播），下面列出的是预告 / 花絮，可单独下载');
+    if (IS_ANDROID) setPgcNote('warn', 'Android 版使用系统直链下载，最高 720P；4K / HDR / 60 帧、音轨、片段与附带内容请在桌面端使用');
+    else if (current.onlySection) setPgcNote('warn', '该季度暂无正片（可能尚未开播），下面列出的是预告 / 花絮，可单独下载');
     else setPgcNote('ok', pgcSummaryText());
   }
   function renderPgcMeta() {
@@ -1158,8 +1168,9 @@
       var o = document.createElement('option');
       o.value = String(q[0]);
       var miss = aq && aq.indexOf(q[0]) < 0;
-      o.textContent = q[1] + (miss ? '（片源 / 账号不支持）' : '');
-      o.disabled = !!miss;
+      var androidCapped = IS_ANDROID && q[0] > 64;
+      o.textContent = q[1] + (androidCapped ? '（Android 直链最高 720P）' : (miss ? '（片源 / 账号不支持）' : ''));
+      o.disabled = !!miss || androidCapped;
       pgcQn.appendChild(o);
     });
     var pick = prev && pgcQn.querySelector('option[value="' + prev + '"]:not([disabled])');
@@ -1175,6 +1186,11 @@
     var opts = pgcEnabledQn();
     if (!opts.length) return;
     var has = function (qn) { return opts.some(function (o) { return Number(o.value) === qn; }); };
+    if (IS_ANDROID) {
+      pgcQn.value = has(64) ? '64' : String(opts[0].value);
+      setPgcNote('warn', 'Android 版使用系统直链下载，最高 720P；4K / HDR / 60 帧、音轨、片段与附带内容请在桌面端使用');
+      return;
+    }
     var fps = pgcFps ? pgcFps.value : 'auto';
     var dr = pgcDr ? pgcDr.value : 'auto';
     var wantHdr = dr === 'hdr';
@@ -1215,6 +1231,7 @@
   }
   function pgcQualityHint() {
     var qn = Number(pgcQn && pgcQn.value);
+    if (IS_ANDROID) return 'Android 直链下载 · 最高 720P；更高画质与片段裁剪请使用桌面端';
     var label = (PGC_QNS.filter(function (q) { return q[0] === qn; })[0] || [])[1] || ('qn ' + qn);
     if (qn === 125) return '已选 ' + label + '：HEVC 10bit / BT.2020，文件体积明显大于 4K SDR';
     if (qn === 120) return '已选 ' + label + '：整部电影体积可能很大，建议先试片段';
@@ -4862,14 +4879,34 @@
     if (batchSub) batchSub.textContent = sub;
     // 同步当前全局清晰度/线程等选项到批量面板
     if (batchQn) {
-      batchQn.innerHTML = qnSelect.innerHTML;
-      if (qnSelect.value) batchQn.value = qnSelect.value;
+      batchQn.innerHTML = '';
+      Array.prototype.forEach.call(qnSelect.options, function (o) {
+        if (IS_ANDROID && (o.disabled || Number(o.value) > 64)) return;
+        batchQn.appendChild(o.cloneNode(true));
+      });
+      if (!batchQn.options.length) {
+        var fallback = document.createElement('option');
+        fallback.value = '64'; fallback.textContent = '720P 高清';
+        batchQn.appendChild(fallback);
+      }
+      var wanted = IS_ANDROID ? '64' : qnSelect.value;
+      batchQn.value = wanted;
+      if (!batchQn.value && batchQn.options.length) batchQn.selectedIndex = 0;
     }
     if (batchEnc && encSelect) batchEnc.value = encSelect.value || 'auto';
     if (batchAf && afSelect) batchAf.value = afSelect.value || 'm4a';
     if (batchAq && aqSelect) batchAq.value = aqSelect.value || '192';
     if (batchThread && threadSelect) batchThread.value = threadSelect.value || '8';
     if (batchFmt && fmtSelect) batchFmt.value = fmtSelect.value || 'mp4';
+    if (IS_ANDROID) {
+      // Android 只有系统直链 MP4：批量面板不暴露编码 / 封装 / 线程选项
+      ['batch-opt-enc', 'batch-opt-format', 'batch-opt-thread'].forEach(function (id) {
+        var el = $(id); if (el) el.hidden = true;
+      });
+      if (batchEnc) batchEnc.value = 'auto';
+      if (batchFmt) batchFmt.value = 'mp4';
+      if (batchThread) batchThread.value = '8';
+    }
     // 渲染任务列表（当前全部待下载）
     renderBatchList(list.map(function () { return { status: 'queued' }; }));
     batchStarted = false;
@@ -5668,7 +5705,7 @@
   });
 
   // 初始化
-  if (IS_ANDROID && optThread) optThread.hidden = true;   // Android 原生流式下载，线程数选项不适用
+  if (IS_ANDROID) { var optThreadRow = $('opt-thread'); if (optThreadRow) optThreadRow.hidden = true; }   // Android 原生流式下载，线程数选项不适用
   checkProxy();
   refreshLoginState();
   updateDlCacheCount();

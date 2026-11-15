@@ -265,7 +265,7 @@
         <option value="320">320 Kbps（极优）</option>
       </select>
     </div>
-    <div class="opt-row">
+    <div class="opt-row" id="batch-opt-thread">
       <label data-i18n="threads">线程数</label>
       <select id="batch-thread">
         <option value="4">4 线程（保守）</option>
@@ -646,18 +646,18 @@
       <span class="pgc-panel-hint">番剧 / 电影专属选项，普通视频页不受影响</span>
     </div>
     <div class="pgc-opt-grid">
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-resolution">
         <label for="pgc-qn">分辨率</label>
         <select id="pgc-qn"></select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-fps">
         <label for="pgc-fps">帧率</label>
         <select id="pgc-fps">
           <option value="auto" selected>自动（按片源）</option>
           <option value="60">优先 60 帧</option>
         </select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-dr">
         <label for="pgc-dr">动态范围</label>
         <select id="pgc-dr">
           <option value="auto" selected>自动</option>
@@ -665,14 +665,14 @@
           <option value="sdr">仅 SDR</option>
         </select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-audio">
         <label for="pgc-audio">音轨</label>
         <select id="pgc-audio">
           <option value="high" selected>AAC 高码率（默认）</option>
           <option value="std">AAC 标准（省流量）</option>
         </select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-enc">
         <label for="pgc-enc">编码</label>
         <select id="pgc-enc">
           <option value="auto" selected>自动（兼容优先）</option>
@@ -681,14 +681,14 @@
           <option value="av1">AV1（最高压缩）</option>
         </select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-fmt">
         <label for="pgc-fmt">封装</label>
         <select id="pgc-fmt">
           <option value="mp4" selected>MP4（通用兼容）</option>
           <option value="mkv">MKV（保留更多轨道）</option>
         </select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-threads">
         <label for="pgc-threads">线程数</label>
         <select id="pgc-threads">
           <option value="4">4 线程（保守）</option>
@@ -697,11 +697,11 @@
           <option value="16">16 线程（最大并发）</option>
         </select>
       </div>
-      <div class="opt-row">
+      <div class="opt-row" id="pgc-opt-clip">
         <label for="pgc-clip">片段</label>
         <input type="text" id="pgc-clip" placeholder="可选：起始-结束，如 00:30-01:15">
       </div>
-      <div class="opt-row pgc-opt-wide">
+      <div class="opt-row pgc-opt-wide" id="pgc-opt-extras">
         <label>附带内容</label>
         <span class="opt-inline">
           <label class="checkbox-label"><input type="checkbox" id="pgc-danmaku"> 弹幕 XML</label>
