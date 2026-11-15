@@ -781,12 +781,12 @@ app.whenReady().then(function () {
     });
   } catch (_) { /* 旧版 Electron 无 webRequest 时忽略 */ }
   try { managed = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'managed-files.json'), 'utf8')); if (!Array.isArray(managed)) managed = []; } catch (_) {}
+  // 恢复上次登录态（若存在），必须在代理启动前注入，保证代理的首个请求就带登录身份
+  restoreLoginCookies();
   proxyStart = startProxy();
   proxyStart.catch(error => logError('代理启动失败：' + error.message));
   registerIpc();
   setupGlobalDownload();
-  // 恢复上次登录态（若存在），需在代理启动前注入，保证首次请求即带登录身份
-  restoreLoginCookies();
   // 先创建窗口立即显示 UI（避免代理网络初始化阻塞启动、造成卡顿白屏），
   // 代理异步就绪；页面加载后会自行探测并轮询等待代理连接。
   const w = createWindow();

@@ -572,7 +572,9 @@
      10 条预告 + 正片混排，编号还和正片重复（第 6 话既是 34 秒预告也是 18:42 正片）。
      这里把它们剔出剧集列表，避免误点；只有预告的季度仍全部保留。 */
   function isTrailerEpisode(ep) {
-    return /预告|PV|花絮|特辑|彩蛋|番外|OAD|OVA/i.test(String((ep && ep.badge) || ''));
+    // 只认「预告 / PV」：这类条目是 30~40 秒的预览，会和正片抢同一编号。
+    // 番外 / OVA / OAD / 花絮本身是可观看内容，不能一起剔掉，否则会藏起真剧集。
+    return /预告|PV|先导/i.test(String((ep && ep.badge) || ''));
   }
 
   /* 把 pgc/view/web/season 的返回映射成界面既有的 bangumi 结构 */
