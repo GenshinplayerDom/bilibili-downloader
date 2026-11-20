@@ -16,7 +16,7 @@
   <div class="logo">▶</div>
   <div class="header-text">
     <h1 id="app-title" data-i18n="appTitle">哔哩下载器</h1>
-    <p data-i18n="subTitle">粘贴 B 站链接，一键下载视频 / 音频</p>
+    <p data-i18n="subTitle">视频 / 番剧 / 电影，一键下载</p>
   </div>
   <div class="header-right">
     <button type="button" class="home-btn" id="home-btn" data-i18n="home" title="返回主菜单（保留本次下载历史）">🏠 主菜单</button>
@@ -29,11 +29,14 @@
 
 <main class="container">
 
-  <!-- UI 模式切换（精简版 / 完全版） -->
-  <div class="ui-switch" id="ui-switch" title="切换界面模式">
-    <button type="button" class="ui-switch-btn" data-mode="lite" data-i18n="lite">精简版</button>
-    <button type="button" class="ui-switch-btn active" data-mode="full" data-i18n="full">完全版</button>
-  </div>
+  <!-- 内容频道：视频 / 番剧 / 电影 -->
+  <nav class="content-tabs" id="content-tabs" role="tablist" aria-label="内容频道">
+    <button type="button" class="content-tab active" data-content="video" role="tab" aria-selected="true">视频</button>
+    <button type="button" class="content-tab" data-content="bangumi" role="tab" aria-selected="false">番剧</button>
+    <button type="button" class="content-tab" data-content="movie" role="tab" aria-selected="false">电影</button>
+  </nav>
+
+  <div class="video-workspace" id="video-workspace">
 
   <!-- 主操作区（中间偏上） -->
   <section class="card finder-card">
@@ -49,7 +52,7 @@
   <section class="card result-card" id="result" hidden>
     <div class="video-card">
       <div class="cover-wrap">
-        <img id="v-cover" alt="封面">
+        <img id="v-cover" alt="封面" referrerpolicy="no-referrer">
         <button type="button" class="cover-play-btn" id="cover-play-btn" title="在线播放（默认 1080P，未登录自动 720P）">▶</button>
       </div>
       <div class="video-meta">
@@ -157,6 +160,51 @@
       <div class="dl-note" id="dl-note"></div>
     </div>
   </section>
+  </div><!-- /video-workspace -->
+
+  <!-- 番剧 / 电影独立搜索页（与普通视频页分离） -->
+  <section class="pgc-search-page" id="pgc-search-page" data-kind="bangumi" hidden aria-labelledby="pgc-search-title">
+    <div class="pgc-search-hero">
+      <div class="pgc-search-eyebrow">
+        <span class="pgc-search-kind" id="pgc-search-kind">番剧专区</span>
+        <span class="pgc-search-scope" id="pgc-search-scope">仅检索番剧</span>
+      </div>
+      <h2 class="pgc-search-title" id="pgc-search-title">找一部想看的番剧</h2>
+      <p class="pgc-search-sub" id="pgc-search-sub">粘贴番剧链接、ss / ep 编号，或输入番剧名称。这里不会解析普通视频链接。</p>
+      <div class="pgc-search-box">
+        <input type="text" id="pgc-search-input" placeholder="番剧名称、ss12345、ep123456 或番剧页面链接" autocomplete="off" spellcheck="false">
+        <button type="button" id="pgc-search-btn">搜索番剧</button>
+        <button type="button" id="pgc-search-clear" hidden>清空</button>
+      </div>
+      <div class="pgc-search-hint" id="pgc-search-hint">支持 ss / ep / bilibili.com/bangumi/play/…；普通视频请切换到「视频」。</div>
+      <div class="pgc-search-status" id="pgc-search-status" role="status" aria-live="polite"></div>
+      <div class="pgc-quick" id="pgc-quick">
+        <span class="pgc-quick-label">快捷搜索</span>
+        <button type="button" class="pgc-quick-chip" data-q="葬送的芙莉莲">葬送的芙莉莲</button>
+        <button type="button" class="pgc-quick-chip" data-q="孤独摇滚">孤独摇滚</button>
+        <button type="button" class="pgc-quick-chip" data-q="排球少年">排球少年</button>
+      </div>
+    </div>
+
+    <div class="pgc-results-head">
+      <div>
+        <h3>搜索结果</h3>
+        <p id="pgc-results-sub">输入关键词开始搜索，或直接粘贴番剧链接。</p>
+      </div>
+      <span class="pgc-results-count" id="pgc-results-count"></span>
+    </div>
+    <div class="pgc-result-grid" id="pgc-result-grid"></div>
+    <div class="pgc-search-empty" id="pgc-search-empty">
+      <div class="pgc-empty-icon">▤</div>
+      <h4 id="pgc-empty-title">搜索你的下一部番剧</h4>
+      <p id="pgc-empty-desc">支持名称、ss / ep 编号和番剧页面链接。搜索结果只会保留番剧内容。</p>
+    </div>
+    <div class="pgc-search-pager" id="pgc-search-pager" hidden>
+      <button type="button" class="mini-btn" id="pgc-page-prev">上一页</button>
+      <span id="pgc-page-info">第 1 页</span>
+      <button type="button" class="mini-btn" id="pgc-page-next">下一页</button>
+    </div>
+  </section>
 
 </main>
 
@@ -164,11 +212,13 @@
 <section class="card tasks-card" id="tasks-card" hidden>
   <div class="tasks-title">
     <button type="button" class="icon-btn task-min" id="task-min-btn" title="最小化为小球">×</button>
-    下载任务 <span class="tasks-sub">本次使用期间保留</span>
-    <button type="button" class="mini-btn" id="tasks-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
-    <button type="button" class="mini-btn" id="tasks-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
-    <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
-    <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除已完成</button>
+    <div class="tasks-heading">下载任务 <span class="tasks-sub">本次使用期间保留</span></div>
+    <div class="tasks-actions">
+      <button type="button" class="mini-btn" id="tasks-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
+      <button type="button" class="mini-btn" id="tasks-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
+      <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">取消全部</button>
+      <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除完成</button>
+    </div>
   </div>
   <div class="tasks-list" id="tasks-list"></div>
 </section>
@@ -384,6 +434,19 @@
   </div>
 
   <div class="settings-body">
+
+    <!-- 界面模式 -->
+    <section class="set-section">
+      <h3>界面模式</h3>
+      <div class="set-block">
+        <label for="ui-mode-select">布局</label>
+        <select id="ui-mode-select">
+          <option value="full" selected>完全版（显示全部选项）</option>
+          <option value="lite">精简版（隐藏高级选项）</option>
+        </select>
+        <div class="set-note">精简版会隐藏编码、封装、片段、定时等高级下载选项，下载能力不变。原顶部切换已移到这里。</div>
+      </div>
+    </section>
 
     <!-- 代理 -->
     <section class="set-section">
@@ -616,7 +679,7 @@
   </div>
 
   <div class="pgc-hero">
-    <div class="pgc-cover"><img id="pgc-cover" alt="" loading="lazy"></div>
+    <div class="pgc-cover"><img id="pgc-cover" alt="" loading="lazy" referrerpolicy="no-referrer"></div>
     <div class="pgc-hero-info">
       <h1 class="pgc-title" id="pgc-title"></h1>
       <div class="pgc-meta" id="pgc-meta"></div>
@@ -736,9 +799,10 @@
 <script defer src="app.js"></script>
 
 <!-- 首次使用说明弹窗 -->
-<div class="guide-modal" id="guide-modal" hidden>
+<div class="guide-modal" id="guide-modal" hidden role="dialog" aria-modal="true" aria-labelledby="guide-title">
   <div class="guide-box">
-    <div class="guide-title">👋 欢迎使用 哔哩下载器 · GenshinplayerDom</div>
+    <button type="button" class="guide-close" id="guide-close" aria-label="关闭使用说明">✕</button>
+    <div class="guide-title" id="guide-title">👋 欢迎使用 哔哩下载器 · GenshinplayerDom</div>
     <div class="guide-sub">首次使用请阅读以下说明</div>
     <div class="guide-body">
       <div class="guide-item"><span class="guide-num">1</span> 粘贴 B 站链接（网页链接 / BV 号 / av 号 / 番剧链接）即可自动识别视频信息，选择类型、清晰度、线程数后点击「下载」。</div>

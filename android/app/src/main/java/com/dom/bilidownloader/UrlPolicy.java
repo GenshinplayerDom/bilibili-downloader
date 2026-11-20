@@ -6,6 +6,12 @@ import java.net.URL;
 final class UrlPolicy {
     static boolean domain(String host, String domain) { return host.equals(domain) || host.endsWith("." + domain); }
     static boolean api(URL url) { return url.getHost().equals("api.bilibili.com") || url.getHost().equals("passport.bilibili.com"); }
+    /** 只向 B 站自有 CDN 下发登录 Cookie；第三方 PCDN 一律不带，避免 SESSDATA 外泄。 */
+    static boolean mediaCookie(URL url) {
+        String host = url.getHost().toLowerCase(java.util.Locale.ROOT);
+        return domain(host, "bilivideo.com") || domain(host, "bilivideo.cn") || domain(host, "bilivideo.net")
+            || domain(host, "hdslb.com") || domain(host, "biliimg.com") || domain(host, "acgvideo.com");
+    }
     static URL validate(String value, String kind) throws IOException {
         URL url = new URL(value.startsWith("//") ? "https:" + value : value);
         if (url.getUserInfo() != null) throw new IOException("不允许的地址");
@@ -18,7 +24,8 @@ final class UrlPolicy {
         boolean allowed = kind.equals("api") ? api(url)
             : kind.equals("expand") ? domain(host, "bilibili.com") || host.equals("b23.tv")
             : api(url) || domain(host, "bilivideo.com") || domain(host, "bilivideo.cn") || domain(host, "bilivideo.net")
-                || domain(host, "hdslb.com") || domain(host, "biliimg.com") || domain(host, "mountaintoys.cn") || domain(host, "biliyungic.com");
+                || domain(host, "hdslb.com") || domain(host, "biliimg.com") || domain(host, "mountaintoys.cn") || domain(host, "biliyungic.com")
+                || domain(host, "acgvideo.com");
         if (!allowed) throw new IOException("不允许的目标域名");
         return url;
     }

@@ -53,7 +53,7 @@ test('resume dirs are confined to part dirs inside the download root', t => {
   fs.writeFileSync(path.join(root, '.bili-parts-file'), 'x');
   assert.equal(assertResumeDir(path.join(root, '.bili-parts-file'), root), null); // 不是目录
 });
-test('legacy cookies migrate to encryption; unavailable encryption never writes plaintext', t => {
+test('legacy cookies migrate to preferred storage; unavailable encryption falls back to 0600 plaintext', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-cookie-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const legacy = path.join(dir, 'bili_cookies.json');
@@ -164,4 +164,28 @@ test('web pairing binds the token to the approved origin and blocks framing', as
   // 清理授权状态，避免影响后续用例（每次授权都需要重新获取 nonce）
   const freshNonce = nonceOf(await (await fetch(base + '/pair')).text());
   assert.equal((await approve({ allow: false, nonce: freshNonce })).status, 200);
+});
+
+test('standalone proxy restores and persists login cookies across restart', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-login-persist-'));
+  t.after(() => {
+    proxy.disableCookiePersistence();
+    proxy.setUserCookies({});
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  fs.writeFileSync(path.join(dir, 'login_cookies.json'), JSON.stringify({ SESSDATA: 'TEST_SESSDATA', DedeUserID: '42' }), { mode: 0o600 });
+  assert.equal(proxy.enableCookiePersistence(dir), true);
+  assert.equal(proxy.getUserLoginInfo().logged, true);
+  assert.equal(proxy.getUserLoginInfo().uid, '42');
+  // 模拟重新登录：内存变化必须落盘
+  proxy.setUserCookies({ SESSDATA: 'TEST_SESSDATA_2', DedeUserID: '42' });
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'login_cookies.json'), 'utf8'));
+  assert.equal(saved.SESSDATA, 'TEST_SESSDATA_2');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'login_cookies.json')).mode & 0o777, 0o600);
+  // 模拟进程重启：清空内存后重新载入同一 profile
+  proxy.disableCookiePersistence();
+  proxy.setUserCookies({});
+  assert.equal(proxy.enableCookiePersistence(dir), true);
+  assert.equal(proxy.getUserLoginInfo().logged, true);
+  assert.equal(proxy.getUserLoginInfo().uid, '42');
 });

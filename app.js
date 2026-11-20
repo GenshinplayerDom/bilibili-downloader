@@ -76,6 +76,32 @@
   var clearBtn = $('clear-btn');
   var finder = $('finder');
   var statusEl = $('finder-status');
+  // 桌面端内容频道：视频 / 番剧 / 电影
+  var contentTabs = $('content-tabs');
+  var videoWorkspace = $('video-workspace');
+  var pgcSearchPage = $('pgc-search-page');
+  var pgcSearchInput = $('pgc-search-input');
+  var pgcSearchBtn = $('pgc-search-btn');
+  var pgcSearchClear = $('pgc-search-clear');
+  var pgcSearchKind = $('pgc-search-kind');
+  var pgcSearchScope = $('pgc-search-scope');
+  var pgcSearchTitle = $('pgc-search-title');
+  var pgcSearchSub = $('pgc-search-sub');
+  var pgcSearchHint = $('pgc-search-hint');
+  var pgcSearchStatus = $('pgc-search-status');
+  var pgcQuick = $('pgc-quick');
+  var pgcResultsSub = $('pgc-results-sub');
+  var pgcResultsCount = $('pgc-results-count');
+  var pgcResultGrid = $('pgc-result-grid');
+  var pgcSearchEmpty = $('pgc-search-empty');
+  var pgcEmptyTitle = $('pgc-empty-title');
+  var pgcEmptyDesc = $('pgc-empty-desc');
+  var pgcSearchPager = $('pgc-search-pager');
+  var pgcPagePrev = $('pgc-page-prev');
+  var pgcPageNext = $('pgc-page-next');
+  var pgcPageInfo = $('pgc-page-info');
+  var contentMode = 'video';
+  var pgcSearchState = { kind: 'bangumi', kw: '', page: 1, pageSize: 20, total: 0 };
   var resultEl = $('result');
   var typeSeg = $('type-seg');
   var qnSelect = $('qn-select');
@@ -350,9 +376,17 @@
     return h > 0 ? h + ':' + p(m) + ':' + p(s) : p(m) + ':' + p(s);
   }
   function safeName(s) {
-    return String(s || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || 'bilibili';
+    var name = String(s || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || 'bilibili';
+    // MediaStore/旧版文件系统对文件名字节长度有限制；中文标题很容易超过 255 字节
+    return name.length > 80 ? name.slice(0, 80).trim() : name;
   }
   function setStatus(cls, text) {
+    // 番剧 / 电影频道使用独立的搜索状态区，避免提示写到被隐藏的视频输入框
+    if (contentMode !== 'video' && pgcSearchStatus) {
+      pgcSearchStatus.className = 'pgc-search-status' + (cls ? ' ' + cls : '');
+      pgcSearchStatus.textContent = text || '';
+      return;
+    }
     statusEl.className = cls || '';
     statusEl.textContent = text || '';
   }
@@ -823,6 +857,10 @@
       setStatus('fail', '无法识别的链接，请输入 B 站视频 BV 号 / av 号 / 完整链接或番剧剧集');
       return;
     }
+    if (contentMode !== 'video' && ['video', 'favlist', 'collection'].indexOf(parsed.kind) >= 0) {
+      setStatus('fail', '当前是' + pgcSearchKindLabel(contentMode) + '频道，普通视频链接请切换到「视频」后再解析。');
+      return;
+    }
     busy = true;
     setNote('', '');   // 新一次解析先清掉上一次的提示，避免试看/权限提示残留到别的视频
     setFinderState('scanning');
@@ -837,6 +875,9 @@
 
     chain.then(function (p) {
       if (!p) throw new Error('短链展开后未识别到视频');
+      if (contentMode !== 'video' && ['season', 'bangumi', 'media'].indexOf(p.kind) < 0) {
+        throw new Error('当前是' + pgcSearchKindLabel(contentMode) + '频道，只支持番剧 / 电影链接；普通视频请切换到「视频」。');
+      }
       if (p.kind === 'season' || p.kind === 'bangumi' || p.kind === 'media') {
         setStatus('loading', p.kind === 'bangumi' ? '正在获取剧集信息…' : '正在获取番剧 / 影视信息…');
         var seasonLoad = p.kind === 'season' ? viewBySeason(p.ssId)
@@ -857,6 +898,12 @@
     }).then(function (res) {
       var data = res.data;
       if (!data) throw new Error('未获取到视频数据');
+      if (contentMode !== 'video' && (res.p.kind === 'season' || res.p.kind === 'bangumi' || res.p.kind === 'media')) {
+        var wantMovie = contentMode === 'movie';
+        if (!!data.isMovie !== wantMovie) {
+          throw new Error('当前是' + (wantMovie ? '电影' : '番剧') + '频道，但该链接是' + (data.isMovie ? '电影' : '番剧') + '；请切换到对应频道后再打开。');
+        }
+      }
       if (res.p.kind === 'season' || res.p.kind === 'bangumi' || res.p.kind === 'media') {
         renderSeason(data, res.p.kind === 'bangumi' ? (data.initialIndex || 0) : 0);
       } else if (res.p.kind === 'favlist') {
@@ -1283,7 +1330,12 @@
   var pgcBackBtn = $('pgc-back');
   if (pgcBackBtn) pgcBackBtn.addEventListener('click', function () {
     hidePgcPage(true);
-    if (resultEl) resultEl.hidden = false;
+    if (contentMode === 'video') {
+      if (resultEl) resultEl.hidden = false;
+    } else {
+      if (resultEl) resultEl.hidden = true;
+      if (pgcSearchPage) pgcSearchPage.hidden = false;
+    }
   });
   var pgcHomeBtn = $('pgc-home');
   if (pgcHomeBtn) pgcHomeBtn.addEventListener('click', goHome);
@@ -2269,7 +2321,13 @@
       var q = Object.keys(signed).map(function (k) {
         return k + '=' + encodeURIComponent(signed[k]);
       }).join('&');
-      return apiGet('https://api.bilibili.com/x/player/playurl?' + q, { preferProxy: true });
+      // 优先走 WBI 签名接口：B 站对未签名 playurl 更容易触发 HTTP 412
+      return apiGet('https://api.bilibili.com/x/player/wbi/playurl?' + q, { preferProxy: true }).catch(function (err) {
+        if (/412|风控|403/i.test(err && err.message || '')) {
+          return apiGet('https://api.bilibili.com/x/player/playurl?' + q, { preferProxy: true });
+        }
+        throw err;
+      });
     });
   }
 
@@ -2572,7 +2630,8 @@
   }
 
   /* ---------- Android 下载/保存（原生桥 window.biliAPI） ---------- */
-  function androidDownload(url, filename, task, meta) {
+  function androidDownload(urls, filename, task, meta) {
+    var list = Array.isArray(urls) ? urls.filter(Boolean) : [urls];
     var cbId = 'dl' + (++androidCbSeq);
     window.__dlCbs = window.__dlCbs || {};
     window.__dlCbs[cbId] = {
@@ -2600,7 +2659,8 @@
       task.cancelled = true;
       if (window.biliAPI && window.biliAPI.cancelDownload) window.biliAPI.cancelDownload(cbId);
     };
-    window.biliAPI.download(url, filename, cbId);
+    if (window.biliAPI.downloadMulti) window.biliAPI.downloadMulti(list.join('\n'), filename, cbId);
+    else window.biliAPI.download(list[0], filename, cbId);
   }
   /** Android DASH 高清合并：原生下载视频轨 + 音频轨，MediaMuxer 封装 MP4 */
   function androidMuxDownload(task, entry, filename) {
@@ -2680,7 +2740,7 @@
       reader.onload = function () {
         if (task.cancelled) { window.biliAPI.saveFinish(cbId, false); return; }
         var b64 = String(reader.result).split(',')[1];
-        window.biliAPI.saveChunk(b64);
+        if (!window.biliAPI.saveChunk(b64)) { window.biliAPI.saveFinish(cbId, false); return; }
         window.__dlCbs[cbId].onProgress(Math.min(offset / size, 1));
         readNext();
       };
@@ -3164,6 +3224,7 @@
   function removeTaskProcess(t) {
     if (!t) return;
     if (t.timer) clearTimeout(t.timer);
+    if (t._retryTimer) clearTimeout(t._retryTimer);
     t.cancelled = true;
     if (t.cancelFn) { try { t.cancelFn(); } catch (e) { } }
     clearResumeState(t);
@@ -3763,7 +3824,8 @@
     }
     // 无 ffmpeg 环境（Android/网页）：回落 durl 直链流程
     var cacheKey = dlCacheKey(current.bvid, current.cid, 16, qn);
-    var cached = getDlCache(cacheKey);
+    // Android 直链通常有时效，且原生下载失败后不会自动换新地址；每次重新获取，避免复用过期缓存导致 403/下载为空
+    var cached = IS_ANDROID ? null : getDlCache(cacheKey);
 
     var durlPromise;
     if (cached && cached.url) {
@@ -3823,7 +3885,7 @@
       if (IS_ANDROID && window.biliAPI && window.biliAPI.download) {
         // Android：原生流式下载直链（带 Referer/身份，绕开大文件 blob 内存限制）
         setTaskStatus(task, 'running', '开始下载（原生流式）…');
-        androidDownload(url, filename, task, { type: 'video', quality: gotName });
+        androidDownload(entry.urls || url, filename, task, { type: 'video', quality: gotName });
         return;
       }
       if (window.biliAPI && window.biliAPI.streamDownload) {
@@ -3966,7 +4028,7 @@
         var filenameM4a = baseName + '_' + entry.bandwidthName + '.m4a';
         if (IS_ANDROID && window.biliAPI && window.biliAPI.download) {
           setTaskStatus(task, 'running', '开始下载（原生流式）…');
-          androidDownload(url, filenameM4a, task, { type: 'audio', quality: entry.bandwidthName });
+          androidDownload(entry.urls || url, filenameM4a, task, { type: 'audio', quality: entry.bandwidthName });
           return;
         }
         if (window.biliAPI && window.biliAPI.streamDownload) {
@@ -4047,7 +4109,21 @@
     if (task.cancelled) { setTaskStatus(task, 'cancelled', T('cancelled')); return; }
     var msg = err && err.message ? err.message : '下载失败';
     if (/412|访问过于频繁|风控/i.test(msg)) {
-      msg = 'B 站风控拦截了本次请求（HTTP 412）。代理已自动换新设备身份重试仍被拦截，通常是因为短时间请求过多，请稍等 1~2 分钟再试。';
+      if (!task._autoRetried) {
+        task._autoRetried = true;
+        var waitSec = 8;
+        setTaskStatus(task, 'queued', '风控冷却中');
+        setTaskNote(task, 'warn', 'B 站要求冷却，' + waitSec + ' 秒后自动重试一次…');
+        showToast('B 站风控冷却中，' + waitSec + ' 秒后自动重试', 'warn');
+        clearTimeout(task._retryTimer);
+        task._retryTimer = setTimeout(function () {
+          if (task.cancelled) return;
+          task._retryTimer = null;
+          runTaskByType(task);
+        }, waitSec * 1000);
+        return;
+      }
+      msg = 'B 站风控拦截了本次请求（HTTP 412）。已自动重试 1 次仍未通过，请等待 1~2 分钟后再点「重试」，或先登录账号再下载。';
     } else if (/已取消|abort|AbortError/i.test(msg)) {
       // 取消后若被后续流程覆盖为 running，恢复为"已取消"状态
       if (task.status === 'running' || task.status === 'error') {
@@ -4351,11 +4427,25 @@
     var seen = false;
     try { seen = localStorage.getItem(GUIDE_KEY) === '1'; } catch (e) { }
     if (seen) return;
-    var show = function () {
-      gModal.hidden = false;
+    var gClose = $('guide-close');
+    var closeGuide = function () {
+      gModal.hidden = true;
       try { localStorage.setItem(GUIDE_KEY, '1'); } catch (e) { }
     };
-    gOk.addEventListener('click', function () { gModal.hidden = true; });
+    var show = function () {
+      gModal.hidden = false;
+      // 旧实现只在「显示」时写标记；现在关闭动作也写，避免关闭失败后反复弹出
+      try { localStorage.setItem(GUIDE_KEY, '1'); } catch (e) { }
+      if (gClose) { try { gClose.focus(); } catch (e) { } }
+    };
+    gOk.addEventListener('click', closeGuide);
+    if (gClose) gClose.addEventListener('click', closeGuide);
+    gModal.addEventListener('click', function (e) {
+      if (e.target === gModal) closeGuide();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !gModal.hidden) closeGuide();
+    });
     // 页面就绪后稍作延迟弹出，保证视觉醒目
     setTimeout(show, 350);
   })();
@@ -4640,7 +4730,7 @@
   /* ---------- v1.2：主题 / 语言 / 限速 / 缓存锁定（优化10 · 功能11 · 功能14） ---------- */
   var I18N = {
     zh: {
-      appTitle: '哔哩下载器 · Dom', subTitle: '粘贴 B 站链接，一键下载视频 / 音频', searchPh: '粘贴 B 站链接 / BV 号，或输入关键词直接搜索',
+      appTitle: '哔哩下载器 · Dom', subTitle: '视频 / 番剧 / 电影，一键下载', searchPh: '粘贴 B 站链接 / BV 号，或输入关键词直接搜索',
       search: '🔍 搜索', clear: '清空', home: '🏠 主菜单', lite: '精简版', full: '完全版',
       video: '视频', audio: '音频', quality: '清晰度', codec: '编码', format: '封装', threads: '线程数', clip: '片段', timer: '定时', extras: '附带',
       export: '导出信息', download: '下载', thTitle: '标题', thViews: '播放量', thDanmaku: '弹幕', thDuration: '时长',
@@ -4660,7 +4750,7 @@
       pageLabels: { '20': '20 个 / 页', '30': '30 个 / 页（默认）', '50': '50 个 / 页', '100': '100 个 / 页' }
     },
     en: {
-      appTitle: 'Bili Downloader · Dom', subTitle: 'Paste a Bilibili link, download videos / audio', searchPh: 'Paste a Bilibili link / BV ID, or type keywords to search',
+      appTitle: 'Bili Downloader · Dom', subTitle: 'Videos / anime / movies, one-click download', searchPh: 'Paste a Bilibili link / BV ID, or type keywords to search',
       search: '🔍 Search', clear: 'Clear', home: '🏠 Home', lite: 'Lite', full: 'Full',
       video: 'Video', audio: 'Audio', quality: 'Quality', codec: 'Codec', format: 'Container', threads: 'Threads', clip: 'Clip', timer: 'Timer', extras: 'Extras',
       export: 'Export Info', download: 'Download', thTitle: 'Title', thViews: 'Views', thDanmaku: 'Danmaku', thDuration: 'Duration',
@@ -5128,6 +5218,17 @@
     if (clearBtn) clearBtn.hidden = true;
     setFinderState('idle');
     setStatus('', '');
+    if (pgcSearchInput) pgcSearchInput.value = '';
+    if (pgcSearchClear) pgcSearchClear.hidden = true;
+    if (contentMode !== 'video') {
+      if (pgcSearchPage) pgcSearchPage.hidden = false;
+      if (videoWorkspace) videoWorkspace.hidden = true;
+      clearPgcSearchResults();
+      updatePgcSearchLabels(contentMode);
+    } else {
+      if (pgcSearchPage) pgcSearchPage.hidden = true;
+      if (videoWorkspace) videoWorkspace.hidden = false;
+    }
     tasksCard.hidden = tasks.length === 0;
     showToast('已返回主菜单', 'ok');
   }
@@ -5711,29 +5812,269 @@
   updateDlCacheCount();
   refreshDlDir();
 
-  // ---- UI 模式切换：精简版（老版 UI）/ 完全版（当前） ----
-  var uiSwitch = $('ui-switch');
+  /* ---------- 桌面端内容频道：视频 / 番剧 / 电影 ---------- */
+  function setPgcSearchStatus(cls, text) {
+    if (!pgcSearchStatus) return;
+    pgcSearchStatus.className = 'pgc-search-status' + (cls ? ' ' + cls : '');
+    pgcSearchStatus.textContent = text || '';
+  }
+  function pgcSearchKindLabel(kind) {
+    return kind === 'movie' ? '电影' : '番剧';
+  }
+  function pgcQuickKeywords(kind) {
+    return kind === 'movie' ? ['流浪地球', '让子弹飞', '奥本海默'] : ['葬送的芙莉莲', '孤独摇滚', '排球少年'];
+  }
+  function renderPgcQuick(kind) {
+    if (!pgcQuick) return;
+    var chips = pgcQuick.querySelectorAll('.pgc-quick-chip');
+    var words = pgcQuickKeywords(kind);
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].setAttribute('data-q', words[i] || '');
+      chips[i].textContent = words[i] || '';
+    }
+  }
+  function updatePgcSearchLabels(kind) {
+    var movie = kind === 'movie';
+    if (pgcSearchPage) pgcSearchPage.setAttribute('data-kind', kind);
+    if (pgcSearchKind) pgcSearchKind.textContent = movie ? '电影专区' : '番剧专区';
+    if (pgcSearchScope) pgcSearchScope.textContent = movie ? '仅检索电影' : '仅检索番剧';
+    if (pgcSearchTitle) pgcSearchTitle.textContent = movie ? '找一部想看的电影' : '找一部想看的番剧';
+    if (pgcSearchSub) pgcSearchSub.textContent = movie
+      ? '粘贴电影链接、ss / ep 编号，或输入电影名称。这里不会解析普通视频链接。'
+      : '粘贴番剧链接、ss / ep 编号，或输入番剧名称。这里不会解析普通视频链接。';
+    if (pgcSearchInput) pgcSearchInput.placeholder = movie
+      ? '电影名称、ss12345、ep123456 或电影页面链接'
+      : '番剧名称、ss12345、ep123456 或番剧页面链接';
+    if (pgcSearchBtn) pgcSearchBtn.textContent = movie ? '搜索电影' : '搜索番剧';
+    if (pgcSearchHint) pgcSearchHint.textContent = movie
+      ? '支持 ss / ep / bilibili.com/bangumi/play/…；普通视频或番剧请切换到对应频道。'
+      : '支持 ss / ep / bilibili.com/bangumi/play/…；普通视频或电影请切换到对应频道。';
+    if (pgcResultsSub) pgcResultsSub.textContent = movie
+      ? '输入关键词开始搜索，或直接粘贴电影链接。'
+      : '输入关键词开始搜索，或直接粘贴番剧链接。';
+    if (pgcEmptyTitle) pgcEmptyTitle.textContent = movie ? '搜索想看的电影' : '搜索你的下一部番剧';
+    if (pgcEmptyDesc) pgcEmptyDesc.textContent = movie
+      ? '支持名称、ss / ep 编号和电影页面链接。搜索结果只会保留电影内容。'
+      : '支持名称、ss / ep 编号和番剧页面链接。搜索结果只会保留番剧内容。';
+    renderPgcQuick(kind);
+  }
+  function clearPgcSearchResults() {
+    if (pgcResultGrid) pgcResultGrid.innerHTML = '';
+    if (pgcResultsCount) pgcResultsCount.textContent = '';
+    if (pgcSearchPager) pgcSearchPager.hidden = true;
+    if (pgcSearchEmpty) pgcSearchEmpty.hidden = false;
+    setPgcSearchStatus('', '');
+  }
+  function applyContentMode(mode, opts) {
+    if (mode !== 'bangumi' && mode !== 'movie' && mode !== 'video') mode = 'video';
+    // 手机端保持原有视频界面，桌面端才开放番剧 / 电影频道
+    if ((IS_ANDROID || (window.innerWidth && window.innerWidth <= 520)) && (!opts || !opts.force)) mode = 'video';
+    var previous = contentMode;
+    contentMode = mode;
+    document.body.setAttribute('data-content-mode', mode);
+    if (contentTabs) {
+      var btns = contentTabs.querySelectorAll('.content-tab');
+      for (var i = 0; i < btns.length; i++) {
+        var active = btns[i].getAttribute('data-content') === mode;
+        btns[i].classList.toggle('active', active);
+        btns[i].setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+    }
+    if (videoWorkspace) videoWorkspace.hidden = mode !== 'video';
+    if (pgcSearchPage) pgcSearchPage.hidden = mode === 'video';
+    try { localStorage.setItem('biliContentMode', mode); } catch (e) { }
+    if (mode === 'video') return;
+    if (pgcPage && !pgcPage.hidden) hidePgcPage(true);
+    if (listPanel) listPanel.hidden = true;
+    if (batchPanel) batchPanel.hidden = true;
+    if (historyPanel) historyPanel.hidden = true;
+    if (queuePanel) queuePanel.hidden = true;
+    if (resultEl) resultEl.hidden = true;
+    document.body.classList.remove('overlay-active');
+    updatePgcSearchLabels(mode);
+    if (previous !== mode || !opts || opts.reset !== false) {
+      pgcSearchState = { kind: mode, kw: '', page: 1, pageSize: 20, total: 0 };
+      if (pgcSearchInput) { pgcSearchInput.value = ''; if (!opts || opts.focus !== false) pgcSearchInput.focus(); }
+      if (pgcSearchClear) pgcSearchClear.hidden = true;
+      if (pgcResultsSub) pgcResultsSub.textContent = mode === 'movie' ? '输入关键词开始搜索，或直接粘贴电影链接。' : '输入关键词开始搜索，或直接粘贴番剧链接。';
+      clearPgcSearchResults();
+    }
+  }
+  function updatePgcSearchPager() {
+    if (!pgcSearchPager) return;
+    var pages = Math.max(1, Math.ceil((pgcSearchState.total || 0) / pgcSearchState.pageSize));
+    pgcSearchPager.hidden = pages <= 1 || !pgcSearchState.kw;
+    if (pgcPageInfo) pgcPageInfo.textContent = '第 ' + pgcSearchState.page + ' / ' + pages + ' 页';
+    if (pgcPagePrev) pgcPagePrev.disabled = pgcSearchState.page <= 1;
+    if (pgcPageNext) pgcPageNext.disabled = pgcSearchState.page >= pages;
+  }
+  function pgcResultMatchesKind(r, kind) {
+    // PGC 搜索接口通常按 media_bangumi / media_ft 分类；有 media_type 时再做一次保险过滤。
+    var mt = Number(r && (r.media_type != null ? r.media_type : (r.season_type != null ? r.season_type : 0)));
+    if (mt !== 1 && mt !== 2) return true;
+    return kind === 'movie' ? mt === 2 : mt === 1;
+  }
+  function renderPgcSearchResults(items, kind) {
+    if (!pgcResultGrid) return;
+    pgcResultGrid.innerHTML = '';
+    if (!items.length) {
+      if (pgcSearchEmpty) pgcSearchEmpty.hidden = false;
+      if (pgcEmptyTitle) pgcEmptyTitle.textContent = '没有找到相关' + pgcSearchKindLabel(kind);
+      if (pgcEmptyDesc) pgcEmptyDesc.textContent = '试试换一个名称，或直接粘贴 ss / ep 编号或对应页面链接。';
+      return;
+    }
+    if (pgcSearchEmpty) pgcSearchEmpty.hidden = true;
+    items.forEach(function (r) {
+      var seasonId = r.season_id || r.seasonId || '';
+      var mediaId = r.media_id || r.mediaId || '';
+      var ref = seasonId ? ('ss' + seasonId) : (mediaId ? ('md' + mediaId) : '');
+      if (!ref) return;
+      var title = cleanSearchTitle(r.title || r.title_display || '未命名');
+      var desc = cleanSearchTitle(r.desc || r.summary || r.evaluate || '');
+      var cover = fixCover(r.cover || r.image_url || '');
+      var indexShow = r.index_show || r.indexShow || '';
+      var score = '';
+      if (r.media_score && typeof r.media_score === 'object') score = r.media_score.score || '';
+      else if (typeof r.media_score === 'number') score = r.media_score;
+      if (!score) score = (typeof r.rating === 'number' || typeof r.rating === 'string') ? r.rating : '';
+      if (!score) score = (typeof r.score === 'number' || typeof r.score === 'string') ? r.score : '';
+      var meta = [];
+      if (score) meta.push('评分 ' + score);
+      if (indexShow) meta.push(indexShow);
+      var styles = Array.isArray(r.styles) ? r.styles.filter(Boolean).join(' / ') : '';
+      if (styles) meta.push(styles);
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'pgc-result-card';
+      card.setAttribute('aria-label', '打开' + title + '下载页');
+      card.innerHTML = '<div class="pgc-result-poster">' +
+        '<img alt="" loading="lazy" referrerpolicy="no-referrer" src="' + escHtml(cover) + '">' +
+        '<span class="poster-fallback">' + escHtml(title.slice(0, 1) || pgcSearchKindLabel(kind).slice(0, 1)) + '</span>' +
+        '<span class="pgc-result-badge">' + pgcSearchKindLabel(kind) + '</span>' +
+        '</div>' +
+        '<div class="pgc-result-body"><h4 class="pgc-result-name">' + escHtml(title) + '</h4>' +
+        (meta.length ? '<div class="pgc-result-meta">' + escHtml(meta.join(' · ')) + '</div>' : '') +
+        (desc ? '<p class="pgc-result-desc">' + escHtml(desc) + '</p>' : '') +
+        '<span class="pgc-result-open">打开下载页 →</span></div>';
+      var img = card.querySelector('img');
+      var fb = card.querySelector('.poster-fallback');
+      if (img && fb) img.addEventListener('error', function () { img.style.display = 'none'; fb.hidden = false; });
+      card.addEventListener('click', function () { startParse(ref); });
+      card.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); startParse(ref); }
+      });
+      pgcResultGrid.appendChild(card);
+    });
+    if (!pgcResultGrid.children.length && pgcSearchEmpty) pgcSearchEmpty.hidden = false;
+  }
+  function doPgcSearch(keyword, page) {
+    var kw = String(keyword || '').trim();
+    var kind = contentMode === 'movie' ? 'movie' : 'bangumi';
+    if (!kw) { setPgcSearchStatus('warn', '请输入' + pgcSearchKindLabel(kind) + '名称或链接'); return; }
+    var pg = Math.max(1, Number(page) || 1);
+    var ps = 20;
+    pgcSearchState = { kind: kind, kw: kw, page: pg, pageSize: ps, total: 0 };
+    setPgcSearchStatus('loading', '正在搜索' + pgcSearchKindLabel(kind) + '「' + kw + '」…');
+    if (pgcSearchEmpty) pgcSearchEmpty.hidden = true;
+    if (pgcResultsCount) pgcResultsCount.textContent = '';
+    if (pgcSearchPager) pgcSearchPager.hidden = true;
+    var searchType = kind === 'movie' ? 'media_ft' : 'media_bangumi';
+    var signedPromise = wbiSign({ search_type: searchType, keyword: kw, page: pg, page_size: ps }).then(function (signed) {
+      var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
+      return 'https://api.bilibili.com/x/web-interface/search/type?' + q;
+    }).catch(function () {
+      return 'https://api.bilibili.com/x/web-interface/search/type?search_type=' + searchType + '&keyword=' + encodeURIComponent(kw) + '&page=' + pg + '&page_size=' + ps;
+    });
+    signedPromise.then(function (url) { return searchApiGet(url); }).then(function (data) {
+      var d = (data && data.data) || {};
+      var results = Array.isArray(d.result) ? d.result : [];
+      results = results.filter(function (r) { return pgcResultMatchesKind(r, kind); });
+      var total = Number(d.numResults) || results.length;
+      pgcSearchState.total = total;
+      renderPgcSearchResults(results, kind);
+      if (pgcResultsCount) pgcResultsCount.textContent = total ? ('共 ' + total + ' 条' + pgcSearchKindLabel(kind)) : '';
+      if (pgcResultsSub) pgcResultsSub.textContent = '「' + kw + '」的' + pgcSearchKindLabel(kind) + '搜索结果';
+      if (results.length) setPgcSearchStatus('ok', '找到 ' + total + ' 条结果');
+      else setPgcSearchStatus('warn', '未找到相关' + pgcSearchKindLabel(kind) + '，试试其他名称或编号');
+      updatePgcSearchPager();
+    }).catch(function (err) {
+      setPgcSearchStatus('fail', '搜索失败：' + (err && err.message || '网络错误'));
+      if (pgcSearchEmpty) pgcSearchEmpty.hidden = false;
+      if (pgcEmptyTitle) pgcEmptyTitle.textContent = '搜索失败';
+      if (pgcEmptyDesc) pgcEmptyDesc.textContent = '请检查网络或稍后重试；也可以直接粘贴 ss / ep 编号。';
+    });
+  }
+  function submitPgcSearch() {
+    var v = pgcSearchInput ? pgcSearchInput.value.trim() : '';
+    if (!v) { setPgcSearchStatus('warn', '请输入' + pgcSearchKindLabel(contentMode) + '名称或链接'); return; }
+    if (/^(https?:)?\/\//i.test(v) || /^(ss|ep|md)\d+/i.test(v) || /^BV[0-9A-Za-z]{10}/i.test(v) || /^(av|favlist)\d*/i.test(v)) {
+      if (/^BV[0-9A-Za-z]{10}/i.test(v) || /^(av|favlist)\d*/i.test(v)) {
+        setPgcSearchStatus('fail', '当前是' + pgcSearchKindLabel(contentMode) + '频道，普通视频链接请切换到「视频」后再解析。');
+        return;
+      }
+      startParse(v);
+      return;
+    }
+    doPgcSearch(v, 1);
+  }
+  if (contentTabs) {
+    contentTabs.addEventListener('click', function (ev) {
+      var btn = ev.target.closest ? ev.target.closest('.content-tab') : null;
+      if (!btn) return;
+      applyContentMode(btn.getAttribute('data-content'));
+    });
+  }
+  if (pgcSearchBtn) pgcSearchBtn.addEventListener('click', submitPgcSearch);
+  if (pgcSearchInput) {
+    pgcSearchInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); submitPgcSearch(); }
+    });
+    pgcSearchInput.addEventListener('input', function () {
+      if (pgcSearchClear) pgcSearchClear.hidden = !pgcSearchInput.value.trim();
+    });
+  }
+  if (pgcSearchClear) pgcSearchClear.addEventListener('click', function () {
+    pgcSearchInput.value = '';
+    pgcSearchClear.hidden = true;
+    clearPgcSearchResults();
+    pgcSearchInput.focus();
+  });
+  if (pgcQuick) pgcQuick.addEventListener('click', function (ev) {
+    var chip = ev.target.closest ? ev.target.closest('.pgc-quick-chip') : null;
+    if (!chip) return;
+    var q = chip.getAttribute('data-q') || '';
+    if (!q) return;
+    pgcSearchInput.value = q;
+    pgcSearchClear.hidden = false;
+    doPgcSearch(q, 1);
+  });
+  if (pgcPagePrev) pgcPagePrev.addEventListener('click', function () { if (pgcSearchState.page > 1) doPgcSearch(pgcSearchState.kw, pgcSearchState.page - 1); });
+  if (pgcPageNext) pgcPageNext.addEventListener('click', function () { doPgcSearch(pgcSearchState.kw, pgcSearchState.page + 1); });
+
+  // ---- UI 模式切换：已移入设置页（精简版 / 完全版） ----
+  var uiModeSelect = $('ui-mode-select');
   var liteEls = document.querySelectorAll('.lite-hide');
   function applyUiMode(mode) {
     var lite = mode === 'lite';
-    if (uiSwitch) {
-      var btns = uiSwitch.querySelectorAll('.ui-switch-btn');
-      for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === mode);
-    }
+    if (uiModeSelect) uiModeSelect.value = lite ? 'lite' : 'full';
     for (var j = 0; j < liteEls.length; j++) liteEls[j].hidden = lite;
     try { localStorage.setItem('biliUiMode', mode); } catch (e) { }
   }
-  if (uiSwitch) {
-    uiSwitch.addEventListener('click', function (ev) {
-      var btn = ev.target.closest ? ev.target.closest('.ui-switch-btn') : null;
-      if (!btn) return;
-      applyUiMode(btn.getAttribute('data-mode'));
-      showToast(btn.getAttribute('data-mode') === 'lite' ? '已切换到精简版' : '已切换到完全版', 'ok');
+  if (uiModeSelect) {
+    uiModeSelect.addEventListener('change', function () {
+      var mode = uiModeSelect.value === 'lite' ? 'lite' : 'full';
+      applyUiMode(mode);
+      showToast(mode === 'lite' ? '已切换到精简版' : '已切换到完全版', 'ok');
     });
-    var savedMode = 'full';
-    try { savedMode = localStorage.getItem('biliUiMode') || 'full'; } catch (e) { }
-    applyUiMode(savedMode);
   }
+  var savedMode = 'full';
+  try { savedMode = localStorage.getItem('biliUiMode') || 'full'; } catch (e) { }
+  applyUiMode(savedMode);
+
+  // 初始化桌面端频道（手机端强制保持视频页）
+  var savedContent = 'video';
+  try { savedContent = localStorage.getItem('biliContentMode') || 'video'; } catch (e) { }
+  applyContentMode(savedContent, { silent: true, focus: false });
 
   // 代理自动重连：客户端版代理异步就绪，未连接时每 2 秒自动重检，
   // 连接成功后停止；避免启动初期显示“未连接”需手动刷新

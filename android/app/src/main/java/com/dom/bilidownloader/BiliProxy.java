@@ -84,18 +84,19 @@ public class BiliProxy {
     /* ---------- 身份 ---------- */
     public String buildCookie() {
         StringBuilder sb = new StringBuilder();
-        if (!buvid3.isEmpty()) sb.append("buvid3=").append(buvid3).append(';');
-        if (!buvid4.isEmpty()) sb.append("buvid4=").append(buvid4).append(';');
-        if (!biliTicket.isEmpty()) sb.append("bili_ticket=").append(biliTicket).append(';');
-        if (!userCookie.isEmpty()) sb.append(' ').append(userCookie);
-        return sb.toString();
+        if (!buvid3.isEmpty()) sb.append("buvid3=").append(buvid3).append("; ");
+        if (!buvid4.isEmpty()) sb.append("buvid4=").append(buvid4).append("; ");
+        if (!biliTicket.isEmpty()) sb.append("bili_ticket=").append(biliTicket).append("; ");
+        if (!userCookie.isEmpty()) sb.append(userCookie);
+        return sb.toString().trim();
     }
 
     private Map<String, String> baseHeaders(String referer) {
         Map<String, String> h = new LinkedHashMap<>();
         h.put("User-Agent", UA);
         h.put("Referer", referer == null ? "https://www.bilibili.com/" : referer);
-        h.put("Accept", "*/*");
+        h.put("Origin", "https://www.bilibili.com");
+        h.put("Accept", "application/json, text/plain, */*");
         h.put("Accept-Language", "zh-CN,zh;q=0.9");
         String ck = buildCookie();
         if (!ck.isEmpty()) h.put("Cookie", ck);
@@ -103,7 +104,7 @@ public class BiliProxy {
     }
 
     /** GET 请求，返回 (status, headers, body) */
-    private static class Resp { int status; Map<String, String> headers; byte[] body; }
+    private static class Resp { int status; Map<String, String> headers; byte[] body; boolean retried; }
 
     private Resp httpsGet(String url, Map<String, String> headers) throws IOException {
         HttpURLConnection conn = null;
@@ -121,7 +122,7 @@ public class BiliProxy {
             Map<String, String> out = new LinkedHashMap<>();
             for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
                 if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty())
-                    out.put(e.getKey().toLowerCase(), e.getValue().get(0));
+                    out.put(e.getKey().toLowerCase(java.util.Locale.ROOT), e.getValue().get(0));
             }
             InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -159,7 +160,7 @@ public class BiliProxy {
             Map<String, String> out = new LinkedHashMap<>();
             for (Map.Entry<String, List<String>> e : conn.getHeaderFields().entrySet()) {
                 if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty())
-                    out.put(e.getKey().toLowerCase(), e.getValue().get(0));
+                    out.put(e.getKey().toLowerCase(java.util.Locale.ROOT), e.getValue().get(0));
             }
             InputStream is = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -239,12 +240,15 @@ public class BiliProxy {
         long now = System.currentTimeMillis();
         if (!force && !buvid3.isEmpty() && expireAt > now) return;
         Resp r = httpsGet("https://api.bilibili.com/x/frontend/finger/spi", baseHeaders("https://www.bilibili.com/"));
+        if (r.status != 200) throw new IOException("设备身份接口 HTTP " + r.status);
         JSON j = JSON.parse(new String(r.body, StandardCharsets.UTF_8));
         JSON d = j != null ? j.obj("data") : null;
         if (d != null) {
             if (d.str("b_3") != null) buvid3 = d.str("b_3");
             if (d.str("b_4") != null) buvid4 = d.str("b_4");
         }
+        // 接口失败或返回空身份时不缓存空结果，下一次请求立即重试，避免一小时静默失败。
+        if (buvid3.isEmpty()) throw new IOException("设备身份为空");
         fetchBiliTicket();
         expireAt = now + TICKET_TTL;
     }
@@ -383,7 +387,7 @@ public class BiliProxy {
                     res.status = r.status;
                     String ct = r.headers.get("content-type");
                     res.mime = (ct != null ? ct : "application/json") + "; charset=utf-8";
-                    res.headers.put("X-Bili-Retry", "1");
+                    if (r.retried) res.headers.put("X-Bili-Retry", "1");
                     res.body = r.body;
                 } catch (Exception e) {
                     res.status = 502;
@@ -401,29 +405,25 @@ public class BiliProxy {
                     return res;
                 }
                 try {
-                    URL target = UrlPolicy.validate(u, "media");
-                    HttpURLConnection conn = (HttpURLConnection) target.openConnection();
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(60000);
-                    conn.setInstanceFollowRedirects(false);
-                    conn.setRequestMethod("GET");
-                    Map<String, String> h = baseHeaders("https://www.bilibili.com/");
-                    h.remove("Cookie"); // 媒体流仅带身份 cookie 可能触发风控，保留仍可
-                    String ck = buildCookie();
-                    if (UrlPolicy.api(target) && !ck.isEmpty()) h.put("Cookie", ck);
-                    for (Map.Entry<String, String> e : h.entrySet()) conn.setRequestProperty(e.getKey(), e.getValue());
                     String range = reqHeaders.get("range");
-                    if (range != null) conn.setRequestProperty("Range", range);
+                    HttpURLConnection conn = openMedia(u, range);
                     int status = conn.getResponseCode();
                     res.isStream = true;
                     res.status = status;
-                    res.stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
-                    res.streamMime = conn.getContentType();
+                    String ct = conn.getContentType();
+                    if ((ct == null || ct.contains("octet-stream")) && u.matches("(?i).*\\.m4s(\\?.*)?$")) ct = "video/mp4";
+                    res.streamMime = ct;
                     res.streamLength = conn.getContentLengthLong();
+                    if (res.streamLength >= 0) res.headers.put("Content-Length", String.valueOf(res.streamLength));
                     String cr = conn.getHeaderField("Content-Range");
                     if (cr != null) res.headers.put("Content-Range", cr);
                     String ar = conn.getHeaderField("Accept-Ranges");
                     if (ar != null) res.headers.put("Accept-Ranges", ar);
+                    String etag = conn.getHeaderField("ETag");
+                    if (etag != null) res.headers.put("ETag", etag);
+                    String lm = conn.getHeaderField("Last-Modified");
+                    if (lm != null) res.headers.put("Last-Modified", lm);
+                    res.stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
                     // 连接在流关闭时释放：交由 WebResourceResponse 消费 InputStream
                     res.streamConn = conn;
                     return res;
@@ -446,18 +446,64 @@ public class BiliProxy {
         }
     }
 
-    public HttpURLConnection streamConn;
+    /**
+     * 打开媒体连接并跟随 CDN 302（最多 5 跳）。每一跳都重新校验域名并只向官方 CDN 下发 Cookie，
+     * 与桌面端 server.js 的 httpsGetFollow 保持一致，避免 302 到真实节点后变成无 Referer/无 Cookie 的裸请求。
+     */
+    private HttpURLConnection openMedia(String value, String range) throws IOException {
+        String current = value;
+        for (int depth = 0; depth <= 5; depth++) {
+            URL target = UrlPolicy.validate(current, "media");
+            HttpURLConnection conn = (HttpURLConnection) target.openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Referer", "https://www.bilibili.com/");
+            conn.setRequestProperty("Origin", "https://www.bilibili.com");
+            conn.setRequestProperty("Accept-Encoding", "identity");
+            try {
+                String ck = buildCookie();
+                if (UrlPolicy.mediaCookie(target) && !ck.isEmpty()) conn.setRequestProperty("Cookie", ck);
+                if (range != null) conn.setRequestProperty("Range", range);
+                int status = conn.getResponseCode();
+                if (status >= 300 && status < 400) {
+                    String location = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    if (location == null || location.isEmpty()) throw new IOException("媒体重定向缺少 Location");
+                    current = new URL(target, location).toString();
+                    continue;
+                }
+                return conn;
+            } catch (IOException e) {
+                conn.disconnect();
+                throw e;
+            } catch (RuntimeException e) {
+                conn.disconnect();
+                throw e;
+            }
+        }
+        throw new IOException("媒体重定向次数过多");
+    }
 
     private Resp biliGet(String url) throws IOException, InterruptedException {
         Resp r = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             gate();
             r = httpsGet(url, baseHeaders("https://www.bilibili.com/"));
-            if (r.status != 412) return r;
-            // 412 风控：递增退避 + 换全新设备身份重试（与 server.js 同策略，更强健）
-            Thread.sleep(1500L * (attempt + 1));
-            resetBuvid();
+            if (r.status != 412) {
+                if (attempt > 0) r.retried = true;
+                return r;
+            }
+            // 412：先递增退避再换一次设备身份。不要每次 412 都立刻换新身份，
+            // 否则换身份请求本身也会加重风控，反而更容易持续 412。
+            Thread.sleep(1200L + 1800L * attempt);
+            if (attempt == 0) {
+                try { resetBuvid(); } catch (IOException ignored) { }
+            }
         }
+        if (r != null) r.retried = true;
         return r;
     }
 

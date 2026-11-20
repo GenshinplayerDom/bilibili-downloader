@@ -21,6 +21,11 @@ for (const file of assets) {
     throw new Error('Run npm run assets:android: ' + file);
   }
 }
+for (const file of ['assets/qr-wechat.png', 'assets/qr-alipay.jpg']) {
+  if (!read(file).equals(fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'assets', file)))) {
+    throw new Error('Run npm run assets:android: ' + file);
+  }
+}
 
 // 三端版本号一致性（app.js / package.json / install.nsi）
 const pkgVersion = JSON.parse(read('package.json').toString('utf8')).version;

@@ -65,6 +65,7 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 var onCookiesChanged = null;
+var cookieStore = null;        // 独立代理模式下用于跨重启保留登录态
 
 var PORT = parseInt(process.env.PORT, 10) || 8123;
 
@@ -110,6 +111,36 @@ function setUserCookies(cookies) {
   }
   // 若未携带身份字段（网页版粘贴 Cookie），保留代理匿名身份
   saveUserCookies();
+}
+
+/**
+ * 独立代理（node server.js）没有 Electron safeStorage，仍使用 CookieStore 的
+ * 0600 明文回退文件保存登录 Cookie；文件与桌面客户端共用同一 userData 目录。
+ * Electron 模式由 main.js 自己管理 CookieStore，不调用本函数，避免双写。
+ */
+function enableCookiePersistence(dir) {
+  try {
+    var CookieStore = require('./lib/cookie-store').CookieStore;
+    var target = pathMod.resolve(dir || process.env.BILI_DATA_DIR || process.env.BILI_PROFILE_DIR || pathMod.join(os.homedir(), '.bili-profile'));
+    cookieStore = new CookieStore(target, null);
+    var saved = cookieStore.load();
+    // 先恢复内存态再挂持久化回调：若目录里只有 Electron 的加密文件、独立代理已无法解密，
+    // 不能因为一次空载入就清掉桌面端仍有效的登录态。
+    setUserCookies(saved);
+    onCookiesChanged = function (cookies) { cookieStore.save(cookies); };
+    if (saved && saved.SESSDATA) console.log('已从本地 profile 恢复登录状态');
+    return true;
+  } catch (e) {
+    cookieStore = null;
+    onCookiesChanged = null;
+    console.warn('登录状态持久化初始化失败，继续以内存模式运行：' + (e && e.message ? e.message : '未知错误'));
+    return false;
+  }
+}
+
+function disableCookiePersistence() {
+  cookieStore = null;
+  onCookiesChanged = null;
 }
 
 function getUserLoginInfo() {
@@ -754,9 +785,12 @@ module.exports = {
   stop: stop,
   setUserCookies: setUserCookies,
   getUserLoginInfo: getUserLoginInfo,
+  enableCookiePersistence: enableCookiePersistence,
+  disableCookiePersistence: disableCookiePersistence,
   buildCookie: buildCookie,
 };
 
 if (require.main === module) {
+  enableCookiePersistence();
   start().catch(function () { process.exit(1); });
 }
