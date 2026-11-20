@@ -131,6 +131,15 @@ const { execFileSync } = require('node:child_process');
     // 模拟流只有 ~1.3s，暂停按钮可能在等待『元素稳定』时就随任务完成而消失，故跳过稳定性检查
     await first.locator('.task-pause').click({ force: true });
     await page.waitForFunction(() => document.querySelector('.task-status').textContent === '已暂停');
+    // 「继续下载」必须是统一样式的任务按钮，不能落回浏览器默认 button 的黑色边框
+    const resumeStyle = await first.locator('.task-resume').evaluate(el => {
+      const s = getComputedStyle(el);
+      return { radius: s.borderRadius, style: s.borderTopStyle, width: s.borderTopWidth, display: s.display };
+    });
+    assert.equal(resumeStyle.radius, '6px');
+    assert.equal(resumeStyle.style, 'solid');
+    assert.equal(resumeStyle.width, '1px');
+    assert.notEqual(resumeStyle.display, 'none');
     // Clearing completed tasks must preserve paused ones.
     await page.locator('#tasks-clear-done').click();
     assert.equal(await page.locator('.task-card').count(), 1);
@@ -164,6 +173,7 @@ const { execFileSync } = require('node:child_process');
     assert.equal(merged.ok, true, merged.error);
     execFileSync(ffmpeg, ['-v', 'error', '-i', merged.path, '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], { stdio: 'pipe', windowsHide: true });
     // 番剧：ep 链接 → PGC 季度解析 → 独立番剧下载页 → 选集 → 按 PGC 取流下载
+    await page.locator('#tasks-clear-done').click();
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep318443');
     await page.locator('#url-input').press('Enter');
     await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
@@ -184,6 +194,25 @@ const { execFileSync } = require('node:child_process');
     await application.evaluate((_, media) => { globalThis.smokeMedia = Object.assign(globalThis.smokeMedia || {}, media); }, { '/video': video, '/audio': audio });
     await page.locator('#pgc-download').click();
     const episodeTask = page.locator('.task-card').last();
+    await episodeTask.waitFor({ state: 'visible', timeout: 5000 });
+    // 番剧页是 z-index:75 的全屏覆盖层：任务卡必须同样盖在详情页上，且新任务要滚入限高容器可视区，
+    // 不能只创建 DOM 却被详情页或旧任务挤出屏幕。
+    const taskCardVisible = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll('.task-card'));
+      const card = cards[cards.length - 1];
+      const box = document.getElementById('tasks-card');
+      if (!card || !box) return false;
+      const rect = card.getBoundingClientRect();
+      const boxRect = box.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return rect.top >= boxRect.top - 1 && rect.bottom <= boxRect.bottom + 1 &&
+        !!(hit && hit.closest('.task-card') === card);
+    });
+    assert.equal(taskCardVisible, true, '番剧下载任务卡应显示在详情页上方并滚入可视区');
+    assert.ok((await episodeTask.locator('.task-status').innerText()).trim().length > 0, '新任务应显示进度状态');
+    assert.ok(await episodeTask.locator('.task-bar').count(), '新任务应显示进度条');
+    fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
+    await page.screenshot({ path: path.join(root, 'artifacts/pgc-download-progress.png'), fullPage: true });
     await episodeTask.locator('.task-status.done').waitFor({ timeout: 20000 });
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/season') && u.includes('ep_id=318443')), '应使用 PGC 季度接口解析');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/player/web/playurl') && u.includes('ep_id=318443')), '剧集取流必须走 PGC playurl 并带 ep_id');
@@ -260,6 +289,36 @@ const { execFileSync } = require('node:child_process');
     const upowerTask = page.locator('.task-card').last();
     await upowerTask.locator('.task-status.error').waitFor({ timeout: 15000 });
     assert.ok(/充电专属/.test(await upowerTask.innerText()), '失败提示应说明是充电专属内容');
+    // 右下角下载队列小球：打开 → 可拖动浮层 → 再次点击收起 → 再点击弹出
+    const queueOrb = page.locator('#queue-orb');
+    await queueOrb.click();
+    await page.locator('#queue-panel').waitFor({ state: 'visible' });
+    await page.waitForTimeout(150);
+    assert.equal(await queueOrb.getAttribute('aria-expanded'), 'true');
+    assert.equal(await page.locator('#queue-orb-icon').innerText(), '✕');
+    assert.ok(await page.locator('#queue-list .task-card').count() > 0, '队列浮层应展示任务');
+    const queueFirstHeight = await page.locator('#queue-list .task-card').first().evaluate(el => el.getBoundingClientRect().height);
+    assert.ok(queueFirstHeight > 20, '已完成任务在队列中不应被折叠为 0 高');
+    const queueBox = await page.locator('#queue-panel').boundingBox();
+    assert.ok(queueBox.width <= 720, '桌面端队列应为浮动窗，而不是整页全屏');
+    assert.ok(queueBox.height > 300, '队列浮层应有足够高度显示多条任务');
+    assert.ok(queueBox.x > 0 && queueBox.y > 0, '队列浮层应位于右下角而非贴满屏幕');
+    const dragStart = await page.locator('#queue-drag-handle').boundingBox();
+    await page.mouse.move(dragStart.x + 40, dragStart.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(dragStart.x + 140, dragStart.y + 80, { steps: 6 });
+    await page.mouse.up();
+    const movedBox = await page.locator('#queue-panel').boundingBox();
+    assert.ok(Math.abs(movedBox.x - queueBox.x) > 20, '拖动标题栏应能水平移动队列浮层');
+    assert.ok(Math.abs(movedBox.y - queueBox.y) > 20, '拖动标题栏应能垂直移动队列浮层');
+    await queueOrb.click();
+    assert.equal(await page.locator('#queue-panel').isHidden(), true, '再次点击小球应收起队列');
+    assert.equal(await queueOrb.getAttribute('aria-expanded'), 'false');
+    await queueOrb.click();
+    await page.locator('#queue-panel').waitFor({ state: 'visible' });
+    await page.locator('#queue-back').click();
+    assert.equal(await page.locator('#queue-panel').isHidden(), true, '队列关闭按钮应能收起浮层');
+    assert.equal(await queueOrb.getAttribute('aria-expanded'), 'false');
     assert.deepEqual(errors, []);
     fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'artifacts/smoke-desktop.png'), fullPage: true });

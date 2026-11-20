@@ -204,24 +204,38 @@ body {
   font-size: 14px;
 }
 
-/* ---------- 下载队列页（布局参考悬浮窗） ---------- */
+/* ---------- 下载队列浮动窗（可拖动） ---------- */
 .queue-panel {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--bg);
-  z-index: 70;
+  top: auto;
+  left: auto;
+  right: 24px;
+  bottom: 96px;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(72vh, 720px);
+  background: var(--card);
+  z-index: 140;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(20, 30, 50, 0.22);
 }
+.queue-panel.dragging { user-select: none; }
 .queue-head {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 14px 16px 8px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
+.queue-head:active { cursor: grabbing; }
 .queue-head h2 { margin: 0; font-size: 18px; color: var(--ink); }
 .queue-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.queue-head-actions button { cursor: pointer; }
 .queue-head .icon-btn { margin-left: 0; }
 .queue-sub {
   padding: 0 16px 10px;
@@ -229,13 +243,15 @@ body {
   color: var(--muted);
 }
 .queue-list {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 96px;
   overflow-y: auto;
-  padding: 4px 16px 24px;
+  padding: 4px 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+.queue-list > .task-card { flex: 0 0 auto; }
 .queue-empty {
   flex: 1;
   display: flex;
@@ -244,6 +260,51 @@ body {
   color: var(--muted);
   font-size: 14px;
 }
+
+/* ---------- 右下角常驻下载队列小球 ---------- */
+.queue-orb {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 150;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  color: #fff;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(251, 114, 153, 0.45);
+  transition: transform 0.15s, box-shadow 0.15s;
+  user-select: none;
+}
+.queue-orb:hover { transform: scale(1.06); box-shadow: 0 8px 24px rgba(251, 114, 153, 0.5); }
+.queue-orb:focus-visible { outline: 3px solid rgba(251, 114, 153, 0.35); outline-offset: 2px; }
+.queue-orb.open { background: linear-gradient(135deg, #5b6ee1, #3f51b5); }
+.queue-orb-icon { line-height: 1; }
+.queue-orb-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--brand-dark);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(20, 30, 50, 0.18);
+  box-sizing: border-box;
+}
+.queue-orb-badge[hidden] { display: none; }
 
 /* ---------- 悬浮窗拖动 ---------- */
 body.overlay-active .tasks-card { cursor: grab; }
@@ -256,7 +317,7 @@ body.overlay-active .tasks-card.dragging { cursor: grabbing; user-select: none; 
 .task-orb {
   position: fixed;
   right: 24px;
-  bottom: 24px;
+  bottom: 92px;
   z-index: 90;
   min-width: 56px;
   height: 56px;
@@ -1020,10 +1081,20 @@ body.no-select { user-select: none; }
 
 /* Task controls remain usable at narrow desktop widths. */
 .task-head { flex-wrap: wrap; }
-.task-pause, .task-retry { border: 1px solid #c4cddd; border-radius: 6px; background: transparent; color: inherit; padding: 4px 10px; cursor: pointer; }
-.task-pause:hover, .task-retry:hover { background: rgba(100, 130, 180, .12); }
+.task-pause, .task-retry, .task-resume {
+  border: 1px solid #c4cddd;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.task-pause:hover, .task-retry:hover, .task-resume:hover { background: rgba(100, 130, 180, .12); }
+.task-resume { border-color: var(--brand); color: var(--brand-dark); font-weight: 600; }
+.task-resume:hover { background: rgba(251, 114, 153, .1); }
 .task-pause:disabled { opacity: .55; cursor: wait; }
-.task-pause[hidden], .task-retry[hidden], .task-cancel[hidden] { display: none; }
+.task-pause[hidden], .task-retry[hidden], .task-resume[hidden], .task-cancel[hidden] { display: none; }
 
 /* 桌面端内容频道：视频 / 番剧 / 电影 */
 .content-tabs {
@@ -1317,6 +1388,13 @@ body.overlay-active .tasks-card {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
 }
 
+/* 番剧 / 电影页的底部操作栏是固定定位：任务卡必须高于 .pgc-page（z-index:75），
+ * 并停在操作栏上方，否则点击“下载本集”后进度卡会被详情页整页盖住。 */
+body.pgc-open .tasks-card {
+  z-index: 95;
+  bottom: 94px;
+}
+
 /* ================= v1.6.6-Android 手机适配 ================= */
 @media (max-width: 520px) {
   .container { max-width: 100%; padding: 0 10px; gap: 8px; }
@@ -1374,6 +1452,11 @@ body.overlay-active .tasks-card {
     left: 0 !important; right: 0 !important; bottom: 0 !important;
     border-radius: 14px 14px 0 0 !important;
   }
+  .queue-panel { max-height: 82vh; }
+  .queue-head { touch-action: auto; cursor: default; }
+  .queue-orb { right: 12px; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; font-size: 20px; }
+  body.queue-open .queue-orb { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(135deg, #5b6ee1, #3f51b5); }
+  .task-orb { right: 12px; bottom: calc(142px + env(safe-area-inset-bottom, 0px)); }
   .player-modal { align-items: flex-end; }
   .player-box { width: 100% !important; max-width: 100% !important; border-radius: 14px 14px 0 0 !important; max-height: 82vh; }
   .support-qr img { width: 220px; }

@@ -125,6 +125,9 @@
   var queuePanel = $('queue-panel');
   var queueList = $('queue-list');
   var queueBack = $('queue-back');
+  var queueOrb = $('queue-orb');
+  var queueOrbIcon = $('queue-orb-icon');
+  var queueOrbBadge = $('queue-orb-badge');
   var queueCancelAll = $('queue-cancel-all');
   var railHomeBtn = $('rail-home-btn');
   // v1.2 新增
@@ -1307,8 +1310,28 @@
   function startPgcDownload() {
     if (!current) return;
     syncPgcToLegacy();
+    // 同一集重复点「下载本集」会在任务列表堆出多个同名任务和多个「继续下载」按钮。
+    // 仅拦截仍在运行 / 暂停 / 排队中的同集任务；已完成或失败的任务仍允许重新下载。
+    var segBtn = typeSeg.querySelector('.seg-btn.active');
+    var type = segBtn ? segBtn.dataset.type : 'video';
+    var existing = tasks.filter(function (t) {
+      if (['running', 'paused', 'waiting', 'queued'].indexOf(t.status) < 0) return false;
+      if (t.type !== type) return false;
+      var s = t.source || {};
+      return String(s.bvid || '') === String(current.bvid || '') &&
+        String(s.cid || '') === String(current.cid || '');
+    })[0];
+    if (existing) {
+      if (existing.el && tasksCard) {
+        var top = existing.el.offsetTop - tasksList.offsetTop - 8;
+        tasksCard.scrollTop = Math.max(0, top);
+      }
+      setPgcNote('warn', '该集已在下载任务中，请使用原任务的「继续下载」，或先取消原任务');
+      showToast('该集已有未完成任务，未重复创建', 'warn');
+      return;
+    }
     startDownload();
-    setPgcNote('ok', '已加入下载队列：' + (pgcSelectedItem() ? '当前选中内容' : '当前视频') + '，可在下载任务列表查看进度');
+    setPgcNote('ok', '已开始下载：' + (pgcSelectedItem() ? '当前选中内容' : '当前视频') + '，进度显示在下方下载任务卡');
   }
   if (pgcFilterEl) {
     pgcFilterEl.addEventListener('click', function (ev) {
@@ -3353,8 +3376,13 @@
     });
     tasksList.appendChild(card);
     tasksCard.hidden = false;
+    // 新任务可能排在已有任务之后，任务卡自身是限高滚动容器：
+    // 自动滚到底部，确保点击下载后立刻能看到新任务的进度，而不是被旧任务挤出可视区。
+    tasksCard.scrollTop = tasksCard.scrollHeight;
     // 注册到全局任务列表（进度事件 / 状态遍历依赖此数组）
     tasks.push(t);
+    updateQueueOrb();
+    if (queuePanel && !queuePanel.hidden) renderQueue();
     return t;
   }
 
@@ -3439,11 +3467,12 @@
       empty.className = 'queue-empty';
       empty.textContent = T('emptyQueue');
       queueList.appendChild(empty);
+      updateQueueOrb();
       return;
     }
     tasks.forEach(function (t) {
       var row = document.createElement('div');
-      row.className = 'task-card' + (t.status === 'done' ? ' task-done' : '');
+      row.className = 'task-card';
       row.innerHTML =
         '<div class="task-head">' +
         '<span class="task-name"></span>' +
@@ -3522,6 +3551,7 @@
       var alive = tasks.filter(function (x) { return ['done', 'error', 'cancelled'].indexOf(x.status) < 0; });
       queueCancelAll.hidden = alive.length === 0;
     }
+    updateQueueOrb();
   }
   function syncQueueRow(t) {
     if (!t || !t._q) return;
@@ -3537,23 +3567,122 @@
       }
     } catch (e) { }
   }
+  function updateQueueOrb() {
+    if (!queueOrb) return;
+    var open = !!(queuePanel && !queuePanel.hidden);
+    queueOrb.classList.toggle('open', open);
+    queueOrb.setAttribute('aria-expanded', open ? 'true' : 'false');
+    queueOrb.title = open ? '收起下载队列' : '打开下载队列';
+    if (queueOrbIcon) queueOrbIcon.textContent = open ? '✕' : '📥';
+    if (queueOrbBadge) {
+      var count = tasks.length;
+      queueOrbBadge.hidden = count === 0;
+      queueOrbBadge.textContent = String(count);
+    }
+  }
+  function clampQueuePanelPosition() {
+    if (!queuePanel || queuePanel.hidden) return;
+    if (!queuePanel.style.left && !queuePanel.style.top) return;
+    var w = queuePanel.offsetWidth;
+    var h = queuePanel.offsetHeight;
+    if (!w || !h) return;
+    var x = parseFloat(queuePanel.style.left) || 0;
+    var y = parseFloat(queuePanel.style.top) || 0;
+    var maxX = Math.max(8, window.innerWidth - w - 8);
+    var maxY = Math.max(8, window.innerHeight - h - 8);
+    queuePanel.style.left = Math.min(Math.max(8, x), maxX) + 'px';
+    queuePanel.style.top = Math.min(Math.max(8, y), maxY) + 'px';
+    queuePanel.style.right = 'auto';
+    queuePanel.style.bottom = 'auto';
+  }
   function openQueuePanel() {
-    capturePrevView();
+    if (!queuePanel) return;
     queuePanel.hidden = false;
-    if (mainContainer) mainContainer.hidden = true;
-    if (historyPanel) historyPanel.hidden = true;
-    if (settingsPanel) settingsPanel.hidden = true;
-    if (settingsMask) settingsMask.hidden = true;
-    if (listPanel) listPanel.hidden = true;
-    if (batchPanel) batchPanel.hidden = true;
-    if (resultEl) resultEl.hidden = true;
-    document.body.classList.remove('overlay-active');
+    document.body.classList.add('queue-open');
     renderQueue();
+    if (queueList) queueList.scrollTop = queueList.scrollHeight;
+    // 等待浮层完成首次布局后再校正位置，避免拖动后高度变化把面板顶出屏幕。
+    if (window.requestAnimationFrame) window.requestAnimationFrame(clampQueuePanelPosition);
+    updateQueueOrb();
   }
   function closeQueuePanel() {
+    if (!queuePanel) return;
     queuePanel.hidden = true;
-    if (mainContainer) mainContainer.hidden = false;
+    queuePanel.classList.remove('dragging');
+    document.body.classList.remove('queue-open');
+    document.body.classList.remove('no-select');
+    updateQueueOrb();
   }
+  function toggleQueuePanel() {
+    if (!queuePanel) return;
+    if (queuePanel.hidden) openQueuePanel();
+    else closeQueuePanel();
+  }
+  // 下载队列浮动窗拖动：仅拖动标题栏，避免拖动任务列表或按钮。
+  (function bindQueueDrag() {
+    var handle = $('queue-drag-handle');
+    if (!queuePanel || !handle) return;
+    var dragging = false;
+    var offsetX = 0;
+    var offsetY = 0;
+    var onMobile = function () {
+      return window.matchMedia && window.matchMedia('(max-width: 520px)').matches;
+    };
+    function start(x, y) {
+      if (queuePanel.hidden || onMobile()) return;
+      var rect = queuePanel.getBoundingClientRect();
+      offsetX = x - rect.left;
+      offsetY = y - rect.top;
+      queuePanel.style.left = rect.left + 'px';
+      queuePanel.style.top = rect.top + 'px';
+      queuePanel.style.right = 'auto';
+      queuePanel.style.bottom = 'auto';
+      dragging = true;
+      queuePanel.classList.add('dragging');
+      document.body.classList.add('no-select');
+    }
+    function move(x, y) {
+      if (!dragging) return;
+      var w = queuePanel.offsetWidth;
+      var h = queuePanel.offsetHeight;
+      var maxX = Math.max(8, window.innerWidth - w - 8);
+      var maxY = Math.max(8, window.innerHeight - h - 8);
+      queuePanel.style.left = Math.min(Math.max(8, x - offsetX), maxX) + 'px';
+      queuePanel.style.top = Math.min(Math.max(8, y - offsetY), maxY) + 'px';
+    }
+    function stop() {
+      if (!dragging) return;
+      dragging = false;
+      queuePanel.classList.remove('dragging');
+      document.body.classList.remove('no-select');
+      clampQueuePanelPosition();
+    }
+    function isControl(target) {
+      return !!(target && target.closest && target.closest('button,input,select,textarea,a'));
+    }
+    handle.addEventListener('mousedown', function (ev) {
+      if (ev.button !== 0 || isControl(ev.target)) return;
+      start(ev.clientX, ev.clientY);
+      ev.preventDefault();
+    });
+    document.addEventListener('mousemove', function (ev) { move(ev.clientX, ev.clientY); });
+    document.addEventListener('mouseup', stop);
+    handle.addEventListener('touchstart', function (ev) {
+      if (onMobile() || isControl(ev.target)) return;
+      var touch = ev.touches[0];
+      if (touch) start(touch.clientX, touch.clientY);
+    }, { passive: true });
+    document.addEventListener('touchmove', function (ev) {
+      if (!dragging) return;
+      var touch = ev.touches[0];
+      if (touch) {
+        ev.preventDefault();
+        move(touch.clientX, touch.clientY);
+      }
+    }, { passive: false });
+    document.addEventListener('touchend', stop);
+    window.addEventListener('resize', clampQueuePanelPosition);
+  })();
 
   /* ---------- 下载执行（多任务并发） ---------- */
   function qnName(qn) {
@@ -4675,14 +4804,12 @@
     return t;
   };
 
-  /* ---------- 下载队列页 + 主菜单 ---------- */
-  if (queueBtn) queueBtn.addEventListener('click', function () {
-    if (queuePanel && !queuePanel.hidden) { closeQueuePanel(); restorePrevView(); return; }
-    openQueuePanel();
-  });
-  bindPager();
-  if (queueBack) queueBack.addEventListener('click', function () { closeQueuePanel(); restorePrevView(); });
-  if (queueCancelAll) queueCancelAll.addEventListener('click', cancelAllTasks);
+  /* ---------- 下载队列浮层 + 主菜单 ---------- */
+  if (queueBtn) queueBtn.addEventListener('click', toggleQueuePanel);
+  if (queueOrb) queueOrb.addEventListener('click', toggleQueuePanel);
+  if (queueBack) queueBack.addEventListener('click', closeQueuePanel);
+  updateQueueOrb();
+  bindPager();  if (queueCancelAll) queueCancelAll.addEventListener('click', cancelAllTasks);
   if ($('queue-pause-all')) $('queue-pause-all').addEventListener('click', pauseAllTasks);
   if ($('queue-continue-all')) $('queue-continue-all').addEventListener('click', continueAllTasks);
   if (railHomeBtn) railHomeBtn.addEventListener('click', goHome);
@@ -4700,6 +4827,8 @@
       done.forEach(function (t) { try { t.el.remove(); } catch (e) { } });
       tasks = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
       tasksCard.hidden = tasks.length === 0;
+      renderQueue();
+      updateQueueOrb();
       showToast('✅ 已清除 ' + done.length + ' 条已完成任务', 'ok');
     });
   }
