@@ -211,8 +211,8 @@ body {
   left: auto;
   right: 24px;
   bottom: 96px;
-  width: min(720px, calc(100vw - 48px));
-  max-height: min(72vh, 720px);
+  width: min(620px, calc(100vw - 48px));
+  max-height: min(46vh, 400px);
   background: var(--card);
   z-index: 140;
   display: flex;
@@ -234,7 +234,7 @@ body {
 }
 .queue-head:active { cursor: grabbing; }
 .queue-head h2 { margin: 0; font-size: 18px; color: var(--ink); }
-.queue-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.queue-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .queue-head-actions button { cursor: pointer; }
 .queue-head .icon-btn { margin-left: 0; }
 .queue-sub {
@@ -246,11 +246,23 @@ body {
   flex: 1 1 auto;
   min-height: 96px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
   padding: 4px 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+.queue-list::-webkit-scrollbar { width: 8px; }
+.queue-list::-webkit-scrollbar-thumb { background: rgba(120, 132, 156, 0.35); border-radius: 8px; }
+.queue-panel:not([hidden]) { animation: queueSlideIn 0.18s ease-out; }
+@keyframes queueSlideIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.task-actions-slot .task-actions { margin-top: 7px; gap: 6px; }
+.task-actions-slot .task-actions button { padding: 2px 9px; font-size: 11px; }
 .queue-list > .task-card { flex: 0 0 auto; }
 .queue-empty {
   flex: 1;
@@ -306,37 +318,7 @@ body {
 }
 .queue-orb-badge[hidden] { display: none; }
 
-/* ---------- 悬浮窗拖动 ---------- */
-body.overlay-active .tasks-card { cursor: grab; }
-body.overlay-active .tasks-card.dragging { cursor: grabbing; user-select: none; }
-.tasks-title { cursor: grab; }
-.tasks-title:active { cursor: grabbing; }
-.tasks-title .task-min { margin-left: 0; }
-
-/* ---------- 最小化小球 ---------- */
-.task-orb {
-  position: fixed;
-  right: 24px;
-  bottom: 92px;
-  z-index: 90;
-  min-width: 56px;
-  height: 56px;
-  padding: 0 14px;
-  border: none;
-  border-radius: 28px;
-  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: grab;
-  box-shadow: 0 6px 20px rgba(251, 114, 153, 0.45);
-  user-select: none;
-}
-.task-orb:active { cursor: grabbing; }
+/* ---------- 拖动 / 选择状态 ---------- */
 body.no-select { user-select: none; }
 
 .hist-item {
@@ -596,9 +578,6 @@ body.no-select { user-select: none; }
 .dl-note.warn { color: var(--warn); }
 
 /* ---------- 下载任务 ---------- */
-.tasks-card { margin-top: 2px; }
-.tasks-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tasks-title .tasks-sub { font-weight: 400; color: var(--muted); font-size: 11px; }
 .tasks-heading { min-width: 0; }
 .tasks-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 .tasks-actions .mini-btn { margin-left: 0; }
@@ -614,7 +593,6 @@ body.no-select { user-select: none; }
 .mini-btn:hover { border-color: var(--brand); color: var(--brand); }
 .mini-btn.danger { border-color: #f2c6c2; color: #c0392b; }
 .mini-btn.danger:hover { border-color: #c0392b; background: #fdf0ef; }
-.tasks-list { display: flex; flex-direction: column; gap: 8px; }
 .task-card {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1127,6 +1105,179 @@ body.no-select { user-select: none; }
 .content-tab[data-content="video"].active { background: var(--brand); box-shadow: 0 3px 10px rgba(251, 114, 153, .28); }
 .content-tab[data-content="bangumi"].active { background: #ef9f28; box-shadow: 0 3px 10px rgba(239, 159, 40, .26); }
 .content-tab[data-content="movie"].active { background: #3b82f6; box-shadow: 0 3px 10px rgba(59, 130, 246, .26); }
+.content-tab[data-content="hot"].active { background: linear-gradient(135deg, #ff5f7e, #e13b62); box-shadow: 0 3px 12px rgba(225, 59, 98, .34); }
+
+/* ---------- 热门推荐独立页（桌面端专属） ---------- */
+body[data-content-mode="hot"] .container { max-width: 1180px; }
+.hot-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  /* 左侧为固定的记录 / 设置竖栏，右侧为下载队列小球：留出安全边距，避免遮挡卡片。 */
+  padding: 4px 64px 30px 70px;
+}
+.hot-page[hidden] { display: none; }
+.hot-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 168px;
+  padding: 28px 30px;
+  border-radius: 22px;
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(1100px 320px at 12% -10%, rgba(255, 89, 125, .52), transparent 62%),
+    radial-gradient(760px 260px at 92% 120%, rgba(90, 110, 255, .34), transparent 66%),
+    linear-gradient(120deg, #262131 0%, #1b1d2a 48%, #171a24 100%);
+  box-shadow: 0 18px 46px rgba(22, 26, 38, .22);
+}
+.hot-hero::after {
+  content: "";
+  position: absolute;
+  right: -34px;
+  top: -58px;
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .13);
+  box-shadow: 0 0 0 34px rgba(255, 255, 255, .045), 0 0 0 76px rgba(255, 255, 255, .025);
+  pointer-events: none;
+}
+.hot-hero-copy { position: relative; z-index: 1; min-width: 0; }
+.hot-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px; border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .16);
+  color: #ffd9e2; font-size: 11.5px; font-weight: 700; letter-spacing: .3px;
+}
+.hot-live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ff6b8a;
+  box-shadow: 0 0 0 4px rgba(255, 107, 138, .18);
+  animation: hotPulse 1.8s ease-in-out infinite;
+}
+@keyframes hotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .62; transform: scale(.82); }
+}
+.hot-hero h2 {
+  margin: 13px 0 7px;
+  font-size: clamp(24px, 2.4vw, 34px);
+  line-height: 1.12;
+  letter-spacing: -.6px;
+  font-weight: 800;
+  color: #fff;
+}
+.hot-hero p {
+  margin: 0;
+  max-width: 640px;
+  color: rgba(255, 255, 255, .70);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+.hot-hero-actions {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  flex: none;
+}
+.hot-updated { color: rgba(255, 255, 255, .58); font-size: 11.5px; white-space: nowrap; }
+.hot-refresh {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .11);
+  color: #fff;
+  font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background .16s, transform .16s, border-color .16s;
+}
+.hot-refresh:hover:not(:disabled) { background: rgba(255, 255, 255, .19); border-color: rgba(255, 255, 255, .38); transform: translateY(-1px); }
+.hot-refresh:disabled { opacity: .62; cursor: wait; }
+.hot-refresh-icon { font-size: 16px; line-height: 1; display: inline-block; }
+.hot-refresh.loading .hot-refresh-icon { animation: hotSpin .9s linear infinite; }
+@keyframes hotSpin { to { transform: rotate(360deg); } }
+.hot-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 4px;
+}
+.hot-toolbar-title { display: inline-flex; align-items: center; gap: 7px; font-size: 16px; font-weight: 800; color: var(--text); }
+.hot-flame { font-size: 15px; }
+.hot-toolbar-note { margin-left: auto; color: var(--sub); font-size: 11.5px; }
+.hot-toolbar-note.ok { color: var(--ok); }
+.hot-toolbar-note.warn { color: var(--warn); }
+.hot-toolbar-note.fail { color: var(--bad); }
+.hot-toolbar-note.loading { color: #e13b62; }
+.hot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.hot-grid:empty { display: none; }
+.hot-card {
+  position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+  padding: 0; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); text-align: left; cursor: pointer;
+  font-family: inherit; color: var(--text);
+  transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+.hot-card:hover, .hot-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: rgba(225, 59, 98, .45);
+  box-shadow: 0 12px 26px rgba(31, 35, 41, .13);
+  outline: none;
+}
+.hot-cover {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, #f4dbe3, #e7ebf4);
+  overflow: hidden;
+}
+.hot-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 1; transition: transform .3s; }
+.hot-cover-fallback {
+  position: absolute; inset: 0; z-index: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 30% 20%, rgba(255, 95, 126, .24), transparent 60%), linear-gradient(135deg, #efe4ea, #e2e8f4);
+  color: rgba(225, 59, 98, .55); font-size: 22px; font-weight: 800; letter-spacing: .16em;
+}
+.hot-card:hover .hot-cover img { transform: scale(1.04); }
+.hot-rank {
+  position: absolute; z-index: 3; left: 9px; top: 9px;
+  min-width: 24px; height: 24px; padding: 0 7px;
+  border-radius: 8px; background: rgba(12, 14, 20, .72);
+  color: #fff; font-size: 12px; font-weight: 800; line-height: 24px; text-align: center;
+}
+.hot-rank.top { background: linear-gradient(135deg, #ff5f7e, #e13b62); box-shadow: 0 3px 10px rgba(225, 59, 98, .35); }
+.hot-dur {
+  position: absolute; z-index: 3; right: 8px; bottom: 8px;
+  padding: 2px 6px; border-radius: 5px;
+  background: rgba(10, 12, 18, .74); color: #fff; font-size: 10.5px; line-height: 1.45;
+}
+.hot-body { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px 13px; }
+.hot-title {
+  margin: 0; font-size: 13.5px; line-height: 1.42; font-weight: 700; min-height: 38px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hot-meta { display: flex; align-items: center; gap: 10px; color: var(--sub); font-size: 10.8px; white-space: nowrap; }
+.hot-meta span { overflow: hidden; text-overflow: ellipsis; }
+.hot-up { min-width: 0; flex: 1; }
+.hot-stats { display: flex; align-items: center; gap: 10px; color: var(--sub); font-size: 10.8px; }
+.hot-card:hover .hot-cta { color: var(--brand-dark); }
+.hot-cta { margin-top: 1px; color: var(--brand); font-size: 11.5px; font-weight: 700; }
+.hot-empty {
+  padding: 46px 20px; border: 1px dashed rgba(225, 59, 98, .3); border-radius: 16px;
+  background: rgba(255, 95, 126, .055); text-align: center;
+}
+.hot-empty[hidden] { display: none; }
+.hot-empty-icon { font-size: 34px; color: #e13b62; opacity: .6; }
+.hot-empty h3 { margin: 8px 0 4px; font-size: 15px; }
+.hot-empty p { margin: 0; color: var(--sub); font-size: 12px; }
 
 .video-workspace { display: flex; flex-direction: column; gap: 10px; }
 .video-workspace[hidden] { display: none; }
@@ -1375,24 +1526,17 @@ body[data-content-mode="movie"] .container { max-width: 1040px; }
 .list-options label { font-size: 12px; color: var(--muted, #888); margin-right: 4px; }
 .list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card); font-size: 12px; }
 
-/* 覆盖面板（列表 / 批量）打开时：任务卡悬浮于底部可见 */
-body.overlay-active .tasks-card {
-  position: fixed;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(760px, calc(100vw - 40px));
-  z-index: 65;
-  max-height: 36vh;
-  overflow-y: auto;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+@media (max-width: 1020px) {
+  .hot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .hot-hero { padding: 22px 24px; }
 }
-
-/* 番剧 / 电影页的底部操作栏是固定定位：任务卡必须高于 .pgc-page（z-index:75），
- * 并停在操作栏上方，否则点击“下载本集”后进度卡会被详情页整页盖住。 */
-body.pgc-open .tasks-card {
-  z-index: 95;
-  bottom: 94px;
+@media (max-width: 760px) {
+  body[data-content-mode="hot"] .container { max-width: 100%; }
+  .hot-page { padding-left: 12px; padding-right: 12px; }
+  .hot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .hot-hero { flex-direction: column; align-items: flex-start; gap: 16px; min-height: auto; }
+  .hot-hero-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
+  .hot-hero h2 { font-size: 24px; }
 }
 
 /* ================= v1.6.6-Android 手机适配 ================= */
@@ -1452,11 +1596,10 @@ body.pgc-open .tasks-card {
     left: 0 !important; right: 0 !important; bottom: 0 !important;
     border-radius: 14px 14px 0 0 !important;
   }
-  .queue-panel { max-height: 82vh; }
+  .queue-panel { max-height: min(58vh, 460px); }
   .queue-head { touch-action: auto; cursor: default; }
   .queue-orb { right: 12px; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; font-size: 20px; }
   body.queue-open .queue-orb { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(135deg, #5b6ee1, #3f51b5); }
-  .task-orb { right: 12px; bottom: calc(142px + env(safe-area-inset-bottom, 0px)); }
   .player-modal { align-items: flex-end; }
   .player-box { width: 100% !important; max-width: 100% !important; border-radius: 14px 14px 0 0 !important; max-height: 82vh; }
   .support-qr img { width: 220px; }
@@ -1528,18 +1671,6 @@ body.pgc-open .tasks-card {
   .list-table td.col-dur { flex: 0 0 auto; width: auto; padding-right: 2px; font-size: 10.5px; color: var(--muted); }
   .list-pager { padding-bottom: 4px; }
 
-  /* 覆盖页面上的下载任务卡：全宽底部浮层，操作按钮单独一行 */
-  body.overlay-active .tasks-card {
-    left: 8px; right: 8px; bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-    transform: none; width: auto; max-height: 52vh; z-index: 120;
-    padding: 10px 12px; border-radius: 14px;
-  }
-  .tasks-title { align-items: center; gap: 6px; }
-  .tasks-title .task-min { flex: 0 0 30px; width: 30px; height: 30px; }
-  .tasks-heading { flex: 1 1 auto; font-size: 14px; }
-  .tasks-title .tasks-sub { display: none; }
-  .tasks-actions { flex: 1 1 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin: 6px 0 0; }
-  .tasks-actions .mini-btn { width: 100%; padding: 6px 3px; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .task-head { gap: 5px; }
   .task-name { flex: 1 1 100%; font-size: 12px; }
   .task-note { font-size: 12px; line-height: 1.45; }

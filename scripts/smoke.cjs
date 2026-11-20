@@ -35,7 +35,7 @@ const { execFileSync } = require('node:child_process');
         const response = Readable.from((async function* () {
           for (let i = start; i <= end; i += 1024) {
             if (signal.aborted) throw signal.reason;
-            if (end > 0) await new Promise(resolve => setTimeout(resolve, 20));
+            if (end > 0) await new Promise(resolve => setTimeout(resolve, 80));
             yield data.subarray(i, Math.min(i + 1024, end + 1));
           }
         })());
@@ -56,6 +56,22 @@ const { execFileSync } = require('node:child_process');
       if (url.pathname === '/api') {
         let data = {};
         if (upstream.pathname.endsWith('/nav')) data = { wbi_img: { img_url: 'https://i0.hdslb.com/' + 'a'.repeat(32) + '.png', sub_url: 'https://i0.hdslb.com/' + 'b'.repeat(32) + '.png' } };
+        if (upstream.pathname.endsWith('/x/web-interface/popular')) {
+          const palettes = [['#ff8aa0', '#7b6cf6'], ['#4facfe', '#00f2fe'], ['#f6d365', '#fda085'], ['#a18cd1', '#fbc2eb'], ['#43e97b', '#38f9d7']];
+          const cover = (i) => {
+            const [a, b] = palettes[i % palettes.length];
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><circle cx="${80 + (i * 37) % 460}" cy="${70 + (i * 29) % 200}" r="120" fill="rgba(255,255,255,.30)"/><circle cx="${560 - (i * 23) % 400}" cy="${300 - (i * 17) % 180}" r="78" fill="rgba(255,255,255,.18)"/><text x="42" y="318" font-family="Arial, sans-serif" font-size="62" font-weight="700" fill="rgba(255,255,255,.92)">HOT ${String(i + 1).padStart(2, '0')}</text></svg>`;
+            return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+          };
+          data = {
+            list: Array.from({ length: 20 }, (_, i) => ({
+              bvid: 'BV1hot0000' + String(10 + i), aid: 500 + i, cid: 600 + i,
+              title: '热门视频 ' + (i + 1), pic: cover(i), duration: 600 + i * 30,
+              owner: { name: '热门UP主' + (i + 1) }, stat: { view: 100000 + i * 5000, danmaku: 1000 + i * 100 },
+              rcmd_reason: { content: '正在热播' }
+            }))
+          };
+        }
         if (upstream.pathname.endsWith('/view') && upstream.searchParams.get('bvid') === 'BV1upower1x7') data = {
           bvid: 'BV1upower1x7', aid: 7, cid: 70, title: '充电专属测试', pic: '', duration: 10, owner: { name: 'UP' },
           stat: { view: 1 }, is_upower_exclusive: true, pages: [{ page: 1, cid: 70, part: '正片', duration: 10 }]
@@ -124,13 +140,44 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#result').waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.locator('.page-chip img').count(), 0);
     assert.equal(await page.evaluate(() => !!window.injected), false);
+    // 下载任务统一进入右下角队列；冒烟测试需要显式打开浮层才能操作任务按钮。
+    const queueCards = () => page.locator('#queue-list .task-card');
+    const openQueue = async () => {
+      if (await page.locator('#queue-panel').isHidden()) {
+        await page.locator('#queue-orb').click();
+        await page.locator('#queue-panel').waitFor({ state: 'visible' });
+      }
+    };
+    const closeQueue = async () => {
+      if (!(await page.locator('#queue-panel').isHidden())) {
+        await page.locator('#queue-back').click();
+        assert.equal(await page.locator('#queue-panel').isHidden(), true, '关闭按钮应能收起下载队列');
+      }
+    };
+    const waitQueueCard = async (index, selector, timeout = 15000) => {
+      await page.waitForFunction(({ index, selector }) => {
+        const card = document.querySelectorAll('#queue-list .task-card')[index];
+        return !!(card && card.querySelector(selector));
+      }, { index, selector }, { timeout });
+    };
+    const waitLastQueueCard = async (selector, timeout = 15000) => {
+      await page.waitForFunction(selector => {
+        const cards = document.querySelectorAll('#queue-list .task-card');
+        const card = cards[cards.length - 1];
+        return !!(card && card.querySelector(selector));
+      }, selector, { timeout });
+    };
     await page.locator('#type-seg [data-type="audio"]').click();
     await page.locator('#dl-btn').click();
-    const first = page.locator('.task-card').nth(0);
-    await first.locator('.task-pause').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => {
+      const btn = document.querySelector('#queue-list .task-card .task-pause');
+      return !!(btn && !btn.hidden);
+    }, null, { timeout: 10000 });
+    await openQueue();
+    const first = queueCards().nth(0);
     // 模拟流只有 ~1.3s，暂停按钮可能在等待『元素稳定』时就随任务完成而消失，故跳过稳定性检查
     await first.locator('.task-pause').click({ force: true });
-    await page.waitForFunction(() => document.querySelector('.task-status').textContent === '已暂停');
+    await page.waitForFunction(() => document.querySelector('#queue-list .task-status').textContent === '已暂停');
     // 「继续下载」必须是统一样式的任务按钮，不能落回浏览器默认 button 的黑色边框
     const resumeStyle = await first.locator('.task-resume').evaluate(el => {
       const s = getComputedStyle(el);
@@ -140,25 +187,27 @@ const { execFileSync } = require('node:child_process');
     assert.equal(resumeStyle.style, 'solid');
     assert.equal(resumeStyle.width, '1px');
     assert.notEqual(resumeStyle.display, 'none');
-    // Clearing completed tasks must preserve paused ones.
-    await page.locator('#tasks-clear-done').click();
-    assert.equal(await page.locator('.task-card').count(), 1);
+    // 没有终态任务时不提供「清除完成」，避免误删正在下载 / 暂停的任务。
+    assert.equal(await page.locator('#queue-clear-done').isHidden(), true, '没有已完成任务时清除完成应隐藏');
+    assert.equal(await queueCards().count(), 1);
     // 暂停态按钮为 .task-resume（.task-pause 此时是隐藏的）
     await first.locator('.task-resume').click({ force: true });
-    await first.locator('.task-status.done').waitFor({ timeout: 15000 });
+    await closeQueue();
+    await waitQueueCard(0, '.task-status.done');
     const original = fs.readdirSync(downloads).find(name => name.endsWith('.m4a'));
     assert.ok(original); assert.equal(fs.statSync(path.join(downloads, original)).size, 65536);
     await page.locator('#dl-btn').click();
-    await page.locator('.task-card').nth(1).locator('.task-status.done').waitFor({ timeout: 15000 });
+    await waitQueueCard(1, '.task-status.done');
     assert.equal(fs.readdirSync(downloads).filter(name => name.endsWith('.m4a')).length, 2);
     assert.ok(fs.readdirSync(downloads).some(name => name.includes('(1)')));
     await application.evaluate(() => { globalThis.smokeFail = true; });
     await page.locator('#dl-btn').click();
-    const failed = page.locator('.task-card').nth(2);
-    await failed.locator('.task-status.error').waitFor({ timeout: 15000 });
+    await waitQueueCard(2, '.task-status.error');
     await application.evaluate(() => { globalThis.smokeFail = false; });
-    await failed.locator('.task-retry').click();
-    await page.locator('.task-card').nth(3).locator('.task-status.done').waitFor({ timeout: 15000 });
+    await openQueue();
+    await queueCards().nth(2).locator('.task-retry').click();
+    await closeQueue();
+    await waitQueueCard(3, '.task-status.done');
     // IPC cannot delete an unrelated existing media file, even in Downloads.
     const unrelated = path.join(downloads, 'unrelated.mp4'); fs.writeFileSync(unrelated, 'keep');
     const result = await page.evaluate(file => window.biliAPI.deleteFile(file), unrelated);
@@ -173,7 +222,9 @@ const { execFileSync } = require('node:child_process');
     assert.equal(merged.ok, true, merged.error);
     execFileSync(ffmpeg, ['-v', 'error', '-i', merged.path, '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-'], { stdio: 'pipe', windowsHide: true });
     // 番剧：ep 链接 → PGC 季度解析 → 独立番剧下载页 → 选集 → 按 PGC 取流下载
-    await page.locator('#tasks-clear-done').click();
+    await openQueue();
+    await page.locator('#queue-clear-done').click();
+    await closeQueue();
     await page.locator('#url-input').fill('https://www.bilibili.com/bangumi/play/ep318443');
     await page.locator('#url-input').press('Enter');
     await page.locator('#pgc-page').waitFor({ state: 'visible', timeout: 10000 });
@@ -193,27 +244,29 @@ const { execFileSync } = require('node:child_process');
     // 番剧取流复用上面的真实音视频样本，确保 DASH 合流走真实 FFmpeg 路径
     await application.evaluate((_, media) => { globalThis.smokeMedia = Object.assign(globalThis.smokeMedia || {}, media); }, { '/video': video, '/audio': audio });
     await page.locator('#pgc-download').click();
-    const episodeTask = page.locator('.task-card').last();
-    await episodeTask.waitFor({ state: 'visible', timeout: 5000 });
-    // 番剧页是 z-index:75 的全屏覆盖层：任务卡必须同样盖在详情页上，且新任务要滚入限高容器可视区，
-    // 不能只创建 DOM 却被详情页或旧任务挤出屏幕。
+    await waitQueueCard(0, '.task-bar', 5000);
+    const episodeTask = queueCards().last();
+    // 番剧页是 z-index:75 的全屏覆盖层：下载队列必须同样盖在详情页上方，
+    // 打开后能看到新任务的进度，而不是被详情页遮住。
+    await openQueue();
     const taskCardVisible = await page.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('.task-card'));
+      const cards = Array.from(document.querySelectorAll('#queue-list .task-card'));
       const card = cards[cards.length - 1];
-      const box = document.getElementById('tasks-card');
+      const box = document.getElementById('queue-list');
       if (!card || !box) return false;
       const rect = card.getBoundingClientRect();
       const boxRect = box.getBoundingClientRect();
-      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(24, rect.height / 2));
       return rect.top >= boxRect.top - 1 && rect.bottom <= boxRect.bottom + 1 &&
         !!(hit && hit.closest('.task-card') === card);
     });
-    assert.equal(taskCardVisible, true, '番剧下载任务卡应显示在详情页上方并滚入可视区');
-    assert.ok((await episodeTask.locator('.task-status').innerText()).trim().length > 0, '新任务应显示进度状态');
+    assert.equal(taskCardVisible, true, '番剧下载任务应显示在下载队列中并位于详情页上方');
+    assert.ok((await episodeTask.locator('.task-status').textContent()).trim().length > 0, '新任务应显示进度状态');
     assert.ok(await episodeTask.locator('.task-bar').count(), '新任务应显示进度条');
     fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'artifacts/pgc-download-progress.png'), fullPage: true });
-    await episodeTask.locator('.task-status.done').waitFor({ timeout: 20000 });
+    await closeQueue();
+    await waitQueueCard(0, '.task-status.done', 20000);
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/season') && u.includes('ep_id=318443')), '应使用 PGC 季度接口解析');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/player/web/playurl') && u.includes('ep_id=318443')), '剧集取流必须走 PGC playurl 并带 ep_id');
     assert.ok(fs.readdirSync(downloads).some(name => name.endsWith('.mp4')), '番剧应落盘为 mp4');
@@ -241,9 +294,9 @@ const { execFileSync } = require('node:child_process');
     await page.waitForFunction(() => /试看/.test(document.querySelector('#pgc-note').textContent), null, { timeout: 10000 });
     const movieMp4Before = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
     await page.locator('#pgc-download').click();
-    const movieTask = page.locator('.task-card').last();
-    await movieTask.locator('.task-status.error').waitFor({ timeout: 15000 });
-    assert.match(await movieTask.innerText(), /试看|大会员/, '试看片段应明确拒绝并说明原因');
+    const movieTask = queueCards().last();
+    await waitLastQueueCard('.task-status.error');
+    assert.match(await movieTask.textContent(), /试看|大会员/, '试看片段应明确拒绝并说明原因');
     assert.equal(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length, movieMp4Before, '试看片段不得落盘');
 
     // 电影（免费）：完整读取并保存
@@ -254,7 +307,7 @@ const { execFileSync } = require('node:child_process');
     assert.equal(await page.locator('#pgc-title').innerText(), '免费电影测试');
     assert.equal((await page.locator('#pgc-note').innerText()).includes('试看'), false, '换片后不应残留上一部影片的试看提示');
     await page.locator('#pgc-download').click();
-    await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
+    await waitLastQueueCard('.task-status.done', 20000);
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > movieMp4Before, '免费电影应落盘');
 
     // 未开播季度：episodes 为空但 section 有预告，必须能展示并提示，不能停在空白
@@ -277,7 +330,7 @@ const { execFileSync } = require('node:child_process');
     assert.equal(await page.locator('#pgc-download-all').isVisible(), false, '单集电影不应显示下载全部');
     assert.ok(upstreamUrls.some(u => u.includes('/pgc/view/web/media') && u.includes('media_id=22630575')), '应通过 media 接口解析 md 页');
     await page.locator('#pgc-download').click();
-    await page.locator('.task-card').last().locator('.task-status.done').waitFor({ timeout: 20000 });
+    await waitLastQueueCard('.task-status.done', 20000);
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length > mdMp4Before, 'md 页应能正常下载');
 
     await page.locator('#pgc-back').click();
@@ -286,9 +339,9 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#url-input').press('Enter');
     await page.waitForFunction(() => /充电专属/.test(document.body.innerText), null, { timeout: 10000 });
     await page.locator('#dl-btn').click();
-    const upowerTask = page.locator('.task-card').last();
-    await upowerTask.locator('.task-status.error').waitFor({ timeout: 15000 });
-    assert.ok(/充电专属/.test(await upowerTask.innerText()), '失败提示应说明是充电专属内容');
+    const upowerTask = queueCards().last();
+    await waitLastQueueCard('.task-status.error');
+    assert.ok(/充电专属/.test(await upowerTask.textContent()), '失败提示应说明是充电专属内容');
     // 右下角下载队列小球：打开 → 可拖动浮层 → 再次点击收起 → 再点击弹出
     const queueOrb = page.locator('#queue-orb');
     await queueOrb.click();
@@ -300,25 +353,49 @@ const { execFileSync } = require('node:child_process');
     const queueFirstHeight = await page.locator('#queue-list .task-card').first().evaluate(el => el.getBoundingClientRect().height);
     assert.ok(queueFirstHeight > 20, '已完成任务在队列中不应被折叠为 0 高');
     const queueBox = await page.locator('#queue-panel').boundingBox();
-    assert.ok(queueBox.width <= 720, '桌面端队列应为浮动窗，而不是整页全屏');
-    assert.ok(queueBox.height > 300, '队列浮层应有足够高度显示多条任务');
+    assert.ok(queueBox.width <= 660, '桌面端队列应为浮动窗，而不是整页全屏');
+    assert.ok(queueBox.height > 300 && queueBox.height <= 420, '队列篇幅应受限，靠列表内部滑动查看');
     assert.ok(queueBox.x > 0 && queueBox.y > 0, '队列浮层应位于右下角而非贴满屏幕');
+    assert.equal(await page.locator('#queue-clear-done').isVisible(), true, '队列应提供清除完成按钮');
+    fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
+    await page.screenshot({ path: path.join(root, 'artifacts/queue-compact.png') });
     const dragStart = await page.locator('#queue-drag-handle').boundingBox();
     await page.mouse.move(dragStart.x + 40, dragStart.y + 20);
     await page.mouse.down();
-    await page.mouse.move(dragStart.x + 140, dragStart.y + 80, { steps: 6 });
+    await page.mouse.move(dragStart.x - 90, dragStart.y + 70, { steps: 6 });
     await page.mouse.up();
     const movedBox = await page.locator('#queue-panel').boundingBox();
-    assert.ok(Math.abs(movedBox.x - queueBox.x) > 20, '拖动标题栏应能水平移动队列浮层');
+    assert.ok(Math.abs(movedBox.x - queueBox.x) > 20, '拖动标题栏应能水平移动队列浮层（受屏幕边界夹取）');
     assert.ok(Math.abs(movedBox.y - queueBox.y) > 20, '拖动标题栏应能垂直移动队列浮层');
     await queueOrb.click();
     assert.equal(await page.locator('#queue-panel').isHidden(), true, '再次点击小球应收起队列');
     assert.equal(await queueOrb.getAttribute('aria-expanded'), 'false');
     await queueOrb.click();
     await page.locator('#queue-panel').waitFor({ state: 'visible' });
+    await page.locator('#queue-clear-done').click();
+    assert.equal(await page.locator('#queue-list .task-card').count(), 0, '清除完成应移除终态任务');
     await page.locator('#queue-back').click();
     assert.equal(await page.locator('#queue-panel').isHidden(), true, '队列关闭按钮应能收起浮层');
     assert.equal(await queueOrb.getAttribute('aria-expanded'), 'false');
+
+    // 热门推荐独立频道：桌面端首次进入自动加载，页面没有搜索栏，刷新按钮重新请求
+    await page.locator('.content-tab[data-content="hot"]').click();
+    await page.locator('#hot-page').waitFor({ state: 'visible', timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll('#hot-grid .hot-card').length === 16, null, { timeout: 15000 });
+    assert.equal(await page.locator('#url-input').isVisible(), false, '热门页不应显示搜索栏');
+    assert.match(await page.locator('#hot-title').textContent(), /今天大家在看什么/);
+    assert.ok((await page.locator('#hot-updated').textContent()).trim().length > 0, '热门页应显示更新时间');
+    const hotCard = page.locator('#hot-grid .hot-card').first();
+    assert.equal(await hotCard.locator('.hot-cover img').count(), 1, '热门卡片应保留封面');
+    assert.ok((await hotCard.locator('.hot-title').textContent()).trim().length > 0, '热门卡片应保留标题');
+    assert.equal(await page.locator('#hot-refresh').isVisible(), true, '热门页应有专属刷新按钮');
+    const hotRequestsBefore = upstreamUrls.filter(u => u.includes('/x/web-interface/popular')).length;
+    await page.locator('#hot-refresh').click();
+    await page.waitForFunction(() => /第 2 页/.test(document.querySelector('#hot-status').textContent), null, { timeout: 15000 });
+    assert.ok(upstreamUrls.filter(u => u.includes('/x/web-interface/popular')).length > hotRequestsBefore, '刷新应重新请求热门接口');
+    assert.equal(await page.locator('#hot-refresh').isDisabled(), false, '刷新结束后按钮应恢复可用');
+    // 等顶部刷新提示自动消失，截图只保留页面本身
+    await page.waitForTimeout(1600);
     assert.deepEqual(errors, []);
     fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'artifacts/smoke-desktop.png'), fullPage: true });

@@ -79,6 +79,15 @@
   // 桌面端内容频道：视频 / 番剧 / 电影
   var contentTabs = $('content-tabs');
   var videoWorkspace = $('video-workspace');
+  var hotPage = $('hot-page');
+  var hotGrid = $('hot-grid');
+  var hotRefresh = $('hot-refresh');
+  var hotRefreshText = $('hot-refresh-text');
+  var hotStatus = $('hot-status');
+  var hotUpdated = $('hot-updated');
+  var hotEmpty = $('hot-empty');
+  var hotEmptyTitle = $('hot-empty-title');
+  var hotEmptyDesc = $('hot-empty-desc');
   var pgcSearchPage = $('pgc-search-page');
   var pgcSearchInput = $('pgc-search-input');
   var pgcSearchBtn = $('pgc-search-btn');
@@ -102,6 +111,7 @@
   var pgcPageInfo = $('pgc-page-info');
   var contentMode = 'video';
   var pgcSearchState = { kind: 'bangumi', kw: '', page: 1, pageSize: 20, total: 0 };
+  var popularState = { items: [], loaded: false, loading: false, updatedAt: 0, error: '' };
   var resultEl = $('result');
   var typeSeg = $('type-seg');
   var qnSelect = $('qn-select');
@@ -117,10 +127,10 @@
   var pagesPanel = $('pages-panel');
   var pagesList = $('pages-list');
   var threadSelect = $('thread-select');
-  var tasksCard = $('tasks-card');
-  var tasksList = $('tasks-list');
-  var tasksClearDone = $('tasks-clear-done');
-  var taskMinBtn = $('task-min-btn');
+  // 下载任务栏已移除；保留一个不挂载到页面的任务存储容器，供进度状态与队列复用。
+  var tasksCard = $('tasks-card') || document.createElement('section');
+  var tasksList = $('tasks-list') || document.createElement('div');
+  if (!tasksList.parentNode) tasksCard.appendChild(tasksList);
   var queueBtn = $('queue-btn');
   var queuePanel = $('queue-panel');
   var queueList = $('queue-list');
@@ -129,6 +139,8 @@
   var queueOrbIcon = $('queue-orb-icon');
   var queueOrbBadge = $('queue-orb-badge');
   var queueCancelAll = $('queue-cancel-all');
+  var queueClearDone = $('queue-clear-done');
+  var queueSub = $('queue-sub');
   var railHomeBtn = $('rail-home-btn');
   // v1.2 新增
   var fmtSelect = $('fmt-select');
@@ -1322,11 +1334,7 @@
         String(s.cid || '') === String(current.cid || '');
     })[0];
     if (existing) {
-      if (existing.el && tasksCard) {
-        var top = existing.el.offsetTop - tasksList.offsetTop - 8;
-        tasksCard.scrollTop = Math.max(0, top);
-      }
-      setPgcNote('warn', '该集已在下载任务中，请使用原任务的「继续下载」，或先取消原任务');
+      setPgcNote('warn', '该集已在下载队列中，请打开右下角队列使用「继续下载」，或先取消原任务');
       showToast('该集已有未完成任务，未重复创建', 'warn');
       return;
     }
@@ -2005,9 +2013,8 @@
         if (type === 'video') downloadVideo(t); else downloadAudio(t);
       });
     });
-    showToast('已加入 ' + n + ' 个下载任务（并发上限 ' + maxConcurrent + '，其余自动排队等待）', 'ok');
-    // 主任务卡片可见
-    tasksCard.hidden = false;
+    showToast('已加入 ' + n + ' 个下载任务（并发上限 ' + maxConcurrent + '，其余自动排队等待），可在右下角队列查看', 'ok');
+    updateQueueOrb();
   }
 
   /* ---------- 清晰度档位（原视频无该分辨率 → 灰显禁用） ---------- */
@@ -3254,7 +3261,6 @@
     if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
     var i = tasks.indexOf(t);
     if (i >= 0) tasks.splice(i, 1);
-    tasksCard.hidden = tasks.length === 0;
     renderQueue();
   }
   function cancelAllTasks() {
@@ -3375,27 +3381,30 @@
       runTaskByType(retry);
     });
     tasksList.appendChild(card);
-    tasksCard.hidden = false;
-    // 新任务可能排在已有任务之后，任务卡自身是限高滚动容器：
-    // 自动滚到底部，确保点击下载后立刻能看到新任务的进度，而不是被旧任务挤出可视区。
-    tasksCard.scrollTop = tasksCard.scrollHeight;
     // 注册到全局任务列表（进度事件 / 状态遍历依赖此数组）
     tasks.push(t);
+    // 队列是下载任务的唯一可见入口：即使浮层未展开也同步渲染，便于状态、角标与后续打开时即时可见。
+    renderQueue();
     updateQueueOrb();
-    if (queuePanel && !queuePanel.hidden) renderQueue();
+    if (queuePanel && !queuePanel.hidden && queueList) queueList.scrollTop = queueList.scrollHeight;
     return t;
   }
 
-  /** 任务终态后显示文件操作键（打开 / 所在位置 / 删除），本次使用期间保留 */
-  function bindTaskActions(t) {
-    if (t.actionsEl) t.actionsEl.innerHTML = '';
+  /** 任务终态后显示文件操作键（预览 / 打开 / 所在位置 / 删除），主任务区与队列共用 */
+  function fillTaskActions(t, host) {
+    if (!host) return;
+    host.innerHTML = '';
     var p = t.path;
-    if (!p) return;
-    if (!fileActionsAvailable()) return;
+    if (!p || !fileActionsAvailable()) return;
     var wrap = document.createElement('div');
     wrap.className = 'task-actions';
+    var clearAll = function () {
+      if (t.actionsEl) t.actionsEl.innerHTML = '';
+      if (t._q && t._q.actions) t._q.actions.innerHTML = '';
+    };
     var mk = function (label, cls, fn) {
       var b = document.createElement('button');
+      b.type = 'button';
       b.textContent = label;
       if (cls) b.className = cls;
       b.addEventListener('click', fn);
@@ -3404,8 +3413,12 @@
     mk(T('preview'), '', function () { openPreview(p); });
     mk(T('open'), '', function () { actOpenFile(p); });
     mk(T('location'), '', function () { actOpenFolder(p); });
-    mk(T('deleteFile'), 'danger', function () { actDeleteFile(p, null, function () { t.actionsEl.innerHTML = ''; }); });
-    t.actionsEl.appendChild(wrap);
+    mk(T('deleteFile'), 'danger', function () { actDeleteFile(p, null, clearAll); });
+    host.appendChild(wrap);
+  }
+  function bindTaskActions(t) {
+    fillTaskActions(t, t.actionsEl);
+    if (t._q && t._q.actions) fillTaskActions(t, t._q.actions);
   }
 
   function updateTaskControls(t) {
@@ -3418,6 +3431,20 @@
     // 跨重启/暂停任务：有续传数据且处于暂停（含重启恢复的待继续）时显示「继续下载」
     if (t.resumeEl) t.resumeEl.hidden = !resumeActive;
     t.el.querySelector('.task-cancel').hidden = ['done', 'error', 'cancelled'].indexOf(t.status) >= 0;
+    updateQueueControls(t);
+  }
+  /** 队列行与旧任务区共享同一状态机：暂停 / 重试 / 继续 / 取消按钮必须随任务状态实时切换 */
+  function updateQueueControls(t) {
+    if (!t || !t._q) return;
+    var q = t._q;
+    var resumeActive = !!(t._resumeMeta && t.status === 'paused');
+    if (q.pause) {
+      q.pause.hidden = !((window.biliAPI && window.biliAPI.pauseDownload && t.token && t.phase !== 'merging' && ['running', 'paused'].indexOf(t.status) >= 0) && !resumeActive);
+      q.pause.textContent = t.status === 'paused' ? T('resume') : T('pause');
+    }
+    if (q.retry) q.retry.hidden = ['error', 'cancelled'].indexOf(t.status) < 0;
+    if (q.resume) q.resume.hidden = !resumeActive;
+    if (q.cancel) q.cancel.hidden = ['done', 'error', 'cancelled'].indexOf(t.status) >= 0;
   }
   function setTaskStatus(t, status, text) {
     t.status = status;
@@ -3436,6 +3463,7 @@
       if (batchCancelAll) batchCancelAll.hidden = alive.length === 0;
       if (listCancelAll) listCancelAll.hidden = alive.length === 0;
       if (queueCancelAll) queueCancelAll.hidden = alive.length === 0;
+      if (queueClearDone) queueClearDone.hidden = tasks.filter(function (x) { return ['done', 'error', 'cancelled'].indexOf(x.status) >= 0; }).length === 0;
     }
     syncQueueRow(t);
   }
@@ -3467,6 +3495,8 @@
       empty.className = 'queue-empty';
       empty.textContent = T('emptyQueue');
       queueList.appendChild(empty);
+      if (queueSub) queueSub.textContent = '暂无下载任务 · 解析视频后会自动进入队列';
+      if (queueClearDone) queueClearDone.hidden = true;
       updateQueueOrb();
       return;
     }
@@ -3484,7 +3514,8 @@
         '<button type="button" class="task-cancel">' + T('cancel') + '</button>' +
         '</div>' +
         '<div class="task-bar" style="--p:0%"></div>' +
-        '<div class="task-note"></div>';
+        '<div class="task-note"></div>' +
+        '<div class="task-actions-slot"></div>';
       row.querySelector('.task-name').textContent = t.name;
       row.querySelector('.task-badge').textContent = t.badge;
       var st = row.querySelector('.task-status');
@@ -3497,7 +3528,9 @@
         note.className = 'task-note' + (t.noteEl.className.indexOf('ok') >= 0 ? ' ok' : t.noteEl.className.indexOf('fail') >= 0 ? ' fail' : t.noteEl.className.indexOf('warn') >= 0 ? ' warn' : '');
         note.textContent = t.noteEl.textContent;
       }
-      t._q = { status: st, bar: bar, note: note, pause: null, retry: null, resume: null, cancel: null };
+      var actionsSlot = row.querySelector('.task-actions-slot');
+      t._q = { row: row, status: st, bar: bar, note: note, actions: actionsSlot, pause: null, retry: null, resume: null, cancel: null };
+      fillTaskActions(t, actionsSlot);
       var cancel = row.querySelector('.task-cancel');
       if (['running', 'paused', 'waiting', 'queued'].indexOf(t.status) < 0) cancel.hidden = true;
       cancel.addEventListener('click', function () {
@@ -3545,12 +3578,16 @@
         resumeStoredTask(t._resumeMeta);
       });
       t._q.resume = resume;
+      updateQueueControls(t);
       queueList.appendChild(row);
     });
     if (queueCancelAll) {
       var alive = tasks.filter(function (x) { return ['done', 'error', 'cancelled'].indexOf(x.status) < 0; });
       queueCancelAll.hidden = alive.length === 0;
     }
+    var finished = tasks.filter(function (x) { return ['done', 'error', 'cancelled'].indexOf(x.status) >= 0; });
+    if (queueClearDone) queueClearDone.hidden = finished.length === 0;
+    if (queueSub) queueSub.textContent = '共 ' + tasks.length + ' 个任务 · 列表上下滑动查看 · 已完成 ' + finished.length;
     updateQueueOrb();
   }
   function syncQueueRow(t) {
@@ -4698,111 +4735,7 @@
     if (e.key === 'Escape' && queuePanel && !queuePanel.hidden) closeQueuePanel();
   });
 
-  /* ---------- v1.6：悬浮窗可拖动 + 最小化小球 ---------- */
-  var orb = null;
-  function ensureOrb() {
-    if (orb) return orb;
-    orb = document.createElement('div');
-    orb.className = 'task-orb';
-    orb.title = '点击展开下载任务';
-    orb.addEventListener('click', function () { expandTasks(); });
-    document.body.appendChild(orb);
-    var drag0 = null;
-    orb.addEventListener('mousedown', function (ev) {
-      ev.preventDefault();
-      drag0 = { sx: ev.clientX, sy: ev.clientY, lx: orb.offsetLeft, ly: orb.offsetTop };
-      document.body.classList.add('no-select');
-    });
-    var moveAt = function (x0, y0) {
-      if (!drag0) return;
-      var x = drag0.lx + (x0 - drag0.sx);
-      var y = drag0.ly + (y0 - drag0.sy);
-      x = Math.max(0, Math.min(window.innerWidth - 70, x));
-      y = Math.max(0, Math.min(window.innerHeight - 70, y));
-      orb.style.left = x + 'px';
-      orb.style.top = y + 'px';
-      orb.style.right = 'auto';
-    };
-    document.addEventListener('mousemove', function (ev) { moveAt(ev.clientX, ev.clientY); });
-    document.addEventListener('mouseup', function () { drag0 = null; document.body.classList.remove('no-select'); });
-    orb.addEventListener('touchstart', function (ev) {
-      var t = ev.touches[0];
-      drag0 = { sx: t.clientX, sy: t.clientY, lx: orb.offsetLeft, ly: orb.offsetTop };
-      document.body.classList.add('no-select');
-    }, { passive: true });
-    document.addEventListener('touchmove', function (ev) {
-      if (!drag0) return;
-      ev.preventDefault();
-      var t = ev.touches[0];
-      moveAt(t.clientX, t.clientY);
-    }, { passive: false });
-    document.addEventListener('touchend', function () { drag0 = null; document.body.classList.remove('no-select'); });
-    return orb;
-  }
-  function minimizeTasks() {
-    if (!tasksCard) return;
-    tasksCard.hidden = true;
-    var o = ensureOrb();
-    o.textContent = '📥 ' + tasks.length;
-    o.style.visibility = 'visible';
-  }
-  function expandTasks() {
-    if (tasksCard) tasksCard.hidden = false;
-    if (orb) orb.style.visibility = 'hidden';
-  }
-  if (taskMinBtn) taskMinBtn.addEventListener('click', minimizeTasks);
-  // 悬浮窗拖动（整个 UI 作为判定范围，排除按钮与输入控件）
-  (function () {
-    var dragging = false, dx = 0, dy = 0;
-    if (!tasksCard) return;
-    var dragStart = function (cx, cy) {
-      dragging = true;
-      var r = tasksCard.getBoundingClientRect();
-      dx = cx - r.left;
-      dy = cy - r.top;
-      tasksCard.classList.add('dragging');
-    };
-    var dragMove = function (cx, cy) {
-      if (!dragging) return;
-      var x = cx - dx;
-      var y = cy - dy;
-      x = Math.max(0, Math.min(window.innerWidth - 160, x));
-      y = Math.max(0, Math.min(window.innerHeight - 50, y));
-      tasksCard.style.left = x + 'px';
-      tasksCard.style.top = y + 'px';
-      tasksCard.style.transform = 'none';
-      tasksCard.style.right = 'auto';
-    };
-    tasksCard.addEventListener('mousedown', function (ev) {
-      if (ev.target.closest && (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('select'))) return;
-      dragStart(ev.clientX, ev.clientY);
-      ev.preventDefault();
-    });
-    document.addEventListener('mousemove', function (ev) { dragMove(ev.clientX, ev.clientY); });
-    document.addEventListener('mouseup', function () { dragging = false; if (tasksCard) tasksCard.classList.remove('dragging'); });
-    tasksCard.addEventListener('touchstart', function (ev) {
-      if (ev.target.closest && (ev.target.closest('button') || ev.target.closest('input') || ev.target.closest('select'))) return;
-      var t = ev.touches[0];
-      dragStart(t.clientX, t.clientY);
-    }, { passive: true });
-    document.addEventListener('touchmove', function (ev) {
-      if (!dragging) return;
-      ev.preventDefault();
-      var t = ev.touches[0];
-      dragMove(t.clientX, t.clientY);
-    }, { passive: false });
-    document.addEventListener('touchend', function () { dragging = false; if (tasksCard) tasksCard.classList.remove('dragging'); });
-  })();
-  // 新建任务时若处于最小化小球状态，自动展开悬浮窗
-  var _origCreateTask = createTask;
-  createTask = function (name, badge) {
-    var t = _origCreateTask(name, badge);
-    if (orb && orb.style.visibility !== 'hidden') {
-      expandTasks();
-      if (orb) orb.style.visibility = 'hidden';
-    }
-    return t;
-  };
+  /* 旧底部下载任务栏与最小化小球已移除，下载任务统一由右下角队列承载。 */
 
   /* ---------- 下载队列浮层 + 主菜单 ---------- */
   if (queueBtn) queueBtn.addEventListener('click', toggleQueuePanel);
@@ -4820,18 +4753,16 @@
     openHistoryPanel();
   });
   historyBack.addEventListener('click', function () { closeHistoryPanel(); restorePrevView(); });
-  if (tasksClearDone) {
-    tasksClearDone.addEventListener('click', function () {
-      var done = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) >= 0; });
-      if (!done.length) { showToast('暂无已完成的任务', 'warn'); return; }
-      done.forEach(function (t) { try { t.el.remove(); } catch (e) { } });
-      tasks = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
-      tasksCard.hidden = tasks.length === 0;
-      renderQueue();
-      updateQueueOrb();
-      showToast('✅ 已清除 ' + done.length + ' 条已完成任务', 'ok');
-    });
+  function clearDoneTasks() {
+    var done = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) >= 0; });
+    if (!done.length) { showToast('暂无已完成的任务', 'warn'); return; }
+    done.forEach(function (t) { try { t.el.remove(); } catch (e) { } });
+    tasks = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
+    renderQueue();
+    updateQueueOrb();
+    showToast('✅ 已清除 ' + done.length + ' 条已完成任务', 'ok');
   }
+  if (queueClearDone) queueClearDone.addEventListener('click', clearDoneTasks);
   var historyClearBtn = $('history-clear');
   if (historyClearBtn) {
     historyClearBtn.addEventListener('click', function () {
@@ -5299,7 +5230,6 @@
     listState = null;
     setFinderState('idle');
     setStatus('', '');
-    tasksCard.hidden = tasks.length === 0;
   });
   if (listCheckAll) listCheckAll.addEventListener('click', function () {
     if (!listState) return;
@@ -5349,16 +5279,22 @@
     setStatus('', '');
     if (pgcSearchInput) pgcSearchInput.value = '';
     if (pgcSearchClear) pgcSearchClear.hidden = true;
-    if (contentMode !== 'video') {
+    if (contentMode === 'hot') {
+      if (hotPage) hotPage.hidden = false;
+      if (pgcSearchPage) pgcSearchPage.hidden = true;
+      if (videoWorkspace) videoWorkspace.hidden = true;
+      if (!popularState.loaded && !popularState.loading) loadPopular({ force: true });
+    } else if (contentMode !== 'video') {
       if (pgcSearchPage) pgcSearchPage.hidden = false;
+      if (hotPage) hotPage.hidden = true;
       if (videoWorkspace) videoWorkspace.hidden = true;
       clearPgcSearchResults();
       updatePgcSearchLabels(contentMode);
     } else {
       if (pgcSearchPage) pgcSearchPage.hidden = true;
+      if (hotPage) hotPage.hidden = true;
       if (videoWorkspace) videoWorkspace.hidden = false;
     }
-    tasksCard.hidden = tasks.length === 0;
     showToast('已返回主菜单', 'ok');
   }
   if (homeBtn) homeBtn.addEventListener('click', goHome);
@@ -5994,9 +5930,154 @@
     if (pgcSearchEmpty) pgcSearchEmpty.hidden = false;
     setPgcSearchStatus('', '');
   }
+  /* ---------- 热门推荐独立页 ---------- */
+  function setHotStatus(cls, text) {
+    if (!hotStatus) return;
+    hotStatus.className = 'hot-toolbar-note' + (cls ? ' ' + cls : '');
+    hotStatus.textContent = text || '';
+  }
+  function hotTimeout(promise, ms) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        reject(new Error('请求超时，请检查网络或代理后重试'));
+      }, ms);
+      promise.then(function (v) {
+        if (settled) return;
+        settled = true; clearTimeout(timer); resolve(v);
+      }, function (e) {
+        if (settled) return;
+        settled = true; clearTimeout(timer); reject(e);
+      });
+    });
+  }
+  function normalizeHotItem(it, index) {
+    it = it || {};
+    var stat = it.stat || {};
+    var owner = it.owner || {};
+    var bvid = it.bvid || (it.aid ? 'av' + it.aid : '');
+    return {
+      bvid: bvid,
+      title: cleanSearchTitle(it.title || '未命名视频'),
+      cover: fixCover(it.pic || ''),
+      owner: owner.name || '',
+      view: Number(stat.view) || 0,
+      danmaku: Number(stat.danmaku) || 0,
+      duration: it.duration || 0,
+      rank: index + 1,
+      reason: cleanSearchTitle(it.rcmd_reason && (it.rcmd_reason.content || it.rcmd_reason) || '')
+    };
+  }
+  function renderHotCards(items) {
+    if (!hotGrid) return;
+    hotGrid.innerHTML = '';
+    items.forEach(function (item) {
+      if (!item.bvid) return;
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'hot-card';
+      card.setAttribute('aria-label', '打开《' + item.title + '》解析下载');
+      var rankCls = item.rank <= 3 ? 'hot-rank top' : 'hot-rank';
+      card.innerHTML =
+        '<div class="hot-cover">' +
+          '<span class="hot-cover-fallback">BILI</span>' +
+          '<img alt="" loading="lazy" referrerpolicy="no-referrer" src="' + escHtml(item.cover) + '">' +
+          '<span class="' + rankCls + '">' + item.rank + '</span>' +
+          (item.duration ? '<span class="hot-dur">' + escHtml(fmtDur(item.duration)) + '</span>' : '') +
+        '</div>' +
+        '<div class="hot-body">' +
+          '<h4 class="hot-title">' + escHtml(item.title) + '</h4>' +
+          '<div class="hot-meta">' +
+            (item.owner ? '<span class="hot-up">UP · ' + escHtml(item.owner) + '</span>' : '<span class="hot-up"></span>') +
+            '<span>▶ ' + escHtml(fmtCount(item.view)) + '</span>' +
+          '</div>' +
+          '<div class="hot-stats"><span>弹幕 ' + escHtml(fmtCount(item.danmaku)) + '</span>' +
+            (item.reason ? '<span>· ' + escHtml(item.reason) + '</span>' : '') + '</div>' +
+          '<span class="hot-cta">解析并下载 →</span>' +
+        '</div>';
+      var img = card.querySelector('img');
+      if (img) img.addEventListener('error', function () { img.style.display = 'none'; });
+      card.addEventListener('click', function () { openHotVideo(item); });
+      hotGrid.appendChild(card);
+    });
+  }
+  function openHotVideo(item) {
+    if (!item || !item.bvid) return;
+    if (contentMode !== 'video') applyContentMode('video', { focus: true });
+    if (inputEl) inputEl.value = item.bvid.indexOf('av') === 0 ? item.bvid : ('https://www.bilibili.com/video/' + item.bvid);
+    if (typeof startParse === 'function') startParse(item.bvid);
+  }
+  function fetchHotList(page) {
+    var popularUrl = 'https://api.bilibili.com/x/web-interface/popular?ps=20&pn=' + page;
+    return hotTimeout(apiGet(popularUrl, { preferProxy: true }), 14000).then(function (data) {
+      if (!data || !Array.isArray(data.list) || !data.list.length) throw new Error('热门接口没有返回视频');
+      return { list: data.list, source: 'popular' };
+    }).catch(function (firstError) {
+      return hotTimeout(apiGet('https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all', { preferProxy: true }), 14000).then(function (data) {
+        if (!data || !Array.isArray(data.list) || !data.list.length) throw new Error('排行榜接口没有返回视频');
+        // 排行榜只有一个固定榜单；刷新时轮换展示顺序，保证每次点击刷新都有可见变化。
+        var shift = ((page - 1) * 4) % data.list.length;
+        return { list: data.list.slice(shift).concat(data.list.slice(0, shift)), source: 'ranking' };
+      }).catch(function () {
+        throw firstError || new Error('热门推荐加载失败');
+      });
+    });
+  }
+  function loadPopular(opts) {
+    opts = opts || {};
+    if (popularState.loading) return Promise.resolve();
+    if (!opts.force && popularState.loaded && Date.now() - popularState.updatedAt < 5 * 60 * 1000) return Promise.resolve();
+    var nextPage = opts.next ? (popularState.page % 3) + 1 : (popularState.page || 1);
+    popularState.loading = true;
+    if (hotRefresh) { hotRefresh.disabled = true; hotRefresh.classList.add('loading'); }
+    if (hotRefreshText) hotRefreshText.textContent = '刷新中…';
+    setHotStatus('loading', '正在获取热门推荐…');
+    if (!popularState.loaded && hotEmpty) hotEmpty.hidden = true;
+    return fetchHotList(nextPage).then(function (result) {
+      var items = result.list.slice(0, 16).map(normalizeHotItem);
+      popularState.items = items;
+      popularState.page = nextPage;
+      popularState.loaded = true;
+      popularState.updatedAt = Date.now();
+      popularState.error = '';
+      renderHotCards(items);
+      if (hotEmpty) hotEmpty.hidden = items.length > 0;
+      if (hotUpdated) {
+        var d = new Date(popularState.updatedAt);
+        var hh = d.getHours() < 10 ? '0' + d.getHours() : String(d.getHours());
+        var mm = d.getMinutes() < 10 ? '0' + d.getMinutes() : String(d.getMinutes());
+        hotUpdated.textContent = hh + ':' + mm + ' 更新 · 共 ' + items.length + ' 条';
+      }
+      setHotStatus('ok', result.source === 'ranking' ? '已更新 · 来自站内排行榜' : ('已更新 · 热门榜第 ' + nextPage + ' 页'));
+      if (opts.manual) showToast('✅ 热门推荐已刷新', 'ok');
+    }).catch(function (error) {
+      popularState.error = (error && error.message) || '加载失败';
+      if (!popularState.items.length) {
+        if (hotEmpty) hotEmpty.hidden = false;
+        if (hotEmptyTitle) hotEmptyTitle.textContent = '暂时没有拿到推荐';
+        if (hotEmptyDesc) hotEmptyDesc.textContent = popularState.error + '。点击右上角「刷新推荐」重试。';
+        setHotStatus('fail', '加载失败');
+      } else {
+        setHotStatus('warn', '刷新失败，已保留上次推荐');
+      }
+      if (opts.manual) showToast('热门推荐刷新失败：' + popularState.error, 'fail');
+    }).finally(function () {
+      popularState.loading = false;
+      if (hotRefresh) { hotRefresh.disabled = false; hotRefresh.classList.remove('loading'); }
+      if (hotRefreshText) hotRefreshText.textContent = '刷新推荐';
+    });
+  }
+  if (hotRefresh) {
+    hotRefresh.addEventListener('click', function () {
+      loadPopular({ force: true, next: true, manual: true });
+    });
+  }
+
   function applyContentMode(mode, opts) {
-    if (mode !== 'bangumi' && mode !== 'movie' && mode !== 'video') mode = 'video';
-    // 手机端保持原有视频界面，桌面端才开放番剧 / 电影频道
+    if (mode !== 'hot' && mode !== 'bangumi' && mode !== 'movie' && mode !== 'video') mode = 'video';
+    // 手机端保持原有视频界面，桌面端才开放热门 / 番剧 / 电影频道
     if ((IS_ANDROID || (window.innerWidth && window.innerWidth <= 520)) && (!opts || !opts.force)) mode = 'video';
     var previous = contentMode;
     contentMode = mode;
@@ -6010,7 +6091,8 @@
       }
     }
     if (videoWorkspace) videoWorkspace.hidden = mode !== 'video';
-    if (pgcSearchPage) pgcSearchPage.hidden = mode === 'video';
+    if (hotPage) hotPage.hidden = mode !== 'hot';
+    if (pgcSearchPage) pgcSearchPage.hidden = !(mode === 'bangumi' || mode === 'movie');
     try { localStorage.setItem('biliContentMode', mode); } catch (e) { }
     if (mode === 'video') return;
     if (pgcPage && !pgcPage.hidden) hidePgcPage(true);
@@ -6020,6 +6102,10 @@
     if (queuePanel) queuePanel.hidden = true;
     if (resultEl) resultEl.hidden = true;
     document.body.classList.remove('overlay-active');
+    if (mode === 'hot') {
+      if (!popularState.loaded && !popularState.loading) loadPopular({ force: true });
+      return;
+    }
     updatePgcSearchLabels(mode);
     if (previous !== mode || !opts || opts.reset !== false) {
       pgcSearchState = { kind: mode, kw: '', page: 1, pageSize: 20, total: 0 };

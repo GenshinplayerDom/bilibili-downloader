@@ -29,8 +29,9 @@
 
 <main class="container">
 
-  <!-- 内容频道：视频 / 番剧 / 电影 -->
+  <!-- 内容频道：热门推荐 / 视频 / 番剧 / 电影 -->
   <nav class="content-tabs" id="content-tabs" role="tablist" aria-label="内容频道">
+    <button type="button" class="content-tab" data-content="hot" role="tab" aria-selected="false">热门推荐</button>
     <button type="button" class="content-tab active" data-content="video" role="tab" aria-selected="true">视频</button>
     <button type="button" class="content-tab" data-content="bangumi" role="tab" aria-selected="false">番剧</button>
     <button type="button" class="content-tab" data-content="movie" role="tab" aria-selected="false">电影</button>
@@ -162,6 +163,33 @@
   </section>
   </div><!-- /video-workspace -->
 
+  <!-- 热门推荐独立页（不包含搜索栏，桌面端专属布局） -->
+  <section class="hot-page" id="hot-page" hidden aria-labelledby="hot-title">
+    <div class="hot-hero">
+      <div class="hot-hero-copy">
+        <div class="hot-eyebrow"><span class="hot-live-dot"></span>热门推荐 · 正在流行</div>
+        <h2 id="hot-title">今天大家在看什么</h2>
+        <p>参考哔哩哔哩手机端热门流，按站内热度为你整理。点击任意卡片即可进入下载页。</p>
+      </div>
+      <div class="hot-hero-actions">
+        <span class="hot-updated" id="hot-updated">等待加载</span>
+        <button type="button" class="hot-refresh" id="hot-refresh" title="刷新热门推荐">
+          <span class="hot-refresh-icon">↻</span><span id="hot-refresh-text">刷新推荐</span>
+        </button>
+      </div>
+    </div>
+    <div class="hot-toolbar">
+      <div class="hot-toolbar-title"><span class="hot-flame">🔥</span>热门视频</div>
+      <span class="hot-toolbar-note" id="hot-status" role="status" aria-live="polite">正在获取推荐…</span>
+    </div>
+    <div class="hot-grid" id="hot-grid"></div>
+    <div class="hot-empty" id="hot-empty" hidden>
+      <div class="hot-empty-icon">◌</div>
+      <h3 id="hot-empty-title">暂时没有拿到推荐</h3>
+      <p id="hot-empty-desc">检查网络后点击右上角「刷新推荐」再试一次。</p>
+    </div>
+  </section>
+
   <!-- 番剧 / 电影独立搜索页（与普通视频页分离） -->
   <section class="pgc-search-page" id="pgc-search-page" data-kind="bangumi" hidden aria-labelledby="pgc-search-title">
     <div class="pgc-search-hero">
@@ -208,21 +236,6 @@
 
 </main>
 
-<!-- 下载任务（独立于主界面，覆盖面板打开时仍可见） -->
-<section class="card tasks-card" id="tasks-card" hidden>
-  <div class="tasks-title">
-    <button type="button" class="icon-btn task-min" id="task-min-btn" title="最小化为小球">×</button>
-    <div class="tasks-heading">下载任务 <span class="tasks-sub">本次使用期间保留</span></div>
-    <div class="tasks-actions">
-      <button type="button" class="mini-btn" id="tasks-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
-      <button type="button" class="mini-btn" id="tasks-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
-      <button type="button" class="mini-btn danger" id="tasks-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">取消全部</button>
-      <button type="button" class="mini-btn" id="tasks-clear-done" title="清除本次使用期间已完成 / 失败 / 已取消的任务">清除完成</button>
-    </div>
-  </div>
-  <div class="tasks-list" id="tasks-list"></div>
-</section>
-
 <!-- 左下角竖向操作栏（记录 + 设置） -->
 <div class="left-rail">
   <button type="button" class="rail-btn theme-toggle" id="theme-toggle-btn" title="切换外观（浅色 / 深色）">☀️</button>
@@ -254,10 +267,11 @@
       <button type="button" class="mini-btn" id="queue-pause-all" title="一键暂停所有正在下载的任务">暂停全部</button>
       <button type="button" class="mini-btn" id="queue-continue-all" title="一键继续所有已暂停 / 待继续的任务">继续全部</button>
       <button type="button" class="mini-btn danger" id="queue-cancel-all" title="一键中断 / 取消所有下载任务（含排队等待中的任务）">中断 / 取消全部</button>
+      <button type="button" class="mini-btn" id="queue-clear-done" title="清除已完成 / 失败 / 已取消的任务">清除完成</button>
       <button type="button" class="icon-btn" id="queue-back" title="收起下载队列">✕</button>
     </div>
   </div>
-  <div class="queue-sub">当前下载任务（本次使用期间保留，可取消）</div>
+  <div class="queue-sub" id="queue-sub">当前下载任务（本次使用期间保留，可取消）</div>
   <div class="queue-list" id="queue-list"></div>
 </section>
 
