@@ -389,6 +389,31 @@ const { execFileSync } = require('node:child_process');
     assert.equal(await hotCard.locator('.hot-cover img').count(), 1, '热门卡片应保留封面');
     assert.ok((await hotCard.locator('.hot-title').textContent()).trim().length > 0, '热门卡片应保留标题');
     assert.equal(await page.locator('#hot-refresh').isVisible(), true, '热门页应有专属刷新按钮');
+    // 桌面软件缩放：窗口变窄时列数应跟着减少，而不是固定列宽溢出。
+    const hotColumns = () => page.evaluate(() => getComputedStyle(document.getElementById('hot-grid')).gridTemplateColumns.split(' ').filter(Boolean).length);
+    // 隐藏窗口的原生 setSize 在 Linux 下不触发重排，这里直接改变内容区宽度，
+    // 验证软件缩放时网格会自动增减列数而不是溢出。
+    const setHotWidth = async (width) => {
+      await page.evaluate(w => {
+        const el = document.getElementById('hot-page');
+        el.style.width = w + 'px';
+        el.style.maxWidth = 'none';
+      }, width);
+      await page.waitForTimeout(120);
+    };
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
+    await page.waitForTimeout(260);
+    assert.equal(await hotColumns(), 4, '宽屏窗口热门网格应为四列');
+    await setHotWidth(900);
+    assert.equal(await hotColumns(), 3, '900px 内容区热门网格应为三列');
+    await setHotWidth(700);
+    assert.equal(await hotColumns(), 2, '700px 内容区热门网格应为两列');
+    await page.evaluate(() => {
+      const el = document.getElementById('hot-page');
+      el.style.width = '';
+      el.style.maxWidth = '';
+    });
+    await page.waitForTimeout(160);
     const hotRequestsBefore = upstreamUrls.filter(u => u.includes('/x/web-interface/popular')).length;
     await page.locator('#hot-refresh').click();
     await page.waitForFunction(() => /第 2 页/.test(document.querySelector('#hot-status').textContent), null, { timeout: 15000 });

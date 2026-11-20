@@ -1114,7 +1114,7 @@ body[data-content-mode="hot"] .container { max-width: 1180px; }
   flex-direction: column;
   gap: 20px;
   /* 左侧为固定的记录 / 设置竖栏，右侧为下载队列小球：留出安全边距，避免遮挡卡片。 */
-  padding: 4px 64px 30px 70px;
+  padding: 4px 80px 30px 70px;
 }
 .hot-page[hidden] { display: none; }
 .hot-hero {
@@ -1215,7 +1215,8 @@ body[data-content-mode="hot"] .container { max-width: 1180px; }
 .hot-toolbar-note.loading { color: #e13b62; }
 .hot-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 随桌面软件窗口宽度自动增减列数：约 700px 两列、900px 三列、1100px 以上四列。 */
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 16px;
 }
 .hot-grid:empty { display: none; }
@@ -1527,13 +1528,11 @@ body[data-content-mode="movie"] .container { max-width: 1040px; }
 .list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card); font-size: 12px; }
 
 @media (max-width: 1020px) {
-  .hot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .hot-grid { gap: 14px; }
   .hot-hero { padding: 22px 24px; }
 }
 @media (max-width: 760px) {
   body[data-content-mode="hot"] .container { max-width: 100%; }
-  .hot-page { padding-left: 12px; padding-right: 12px; }
-  .hot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .hot-hero { flex-direction: column; align-items: flex-start; gap: 16px; min-height: auto; }
   .hot-hero-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
   .hot-hero h2 { font-size: 24px; }
@@ -1546,6 +1545,7 @@ body[data-content-mode="movie"] .container { max-width: 1040px; }
   .content-tabs { display: none; }
   body[data-content-mode="bangumi"] .container,
   body[data-content-mode="movie"] .container { max-width: 100%; }
+  .hot-page { padding-left: 10px; padding-right: 10px; }
   .pgc-search-page { display: none !important; }
   .site-header { padding: 12px 12px 8px; gap: 8px; justify-content: flex-start; }
   .logo { width: 32px; height: 32px; flex: 0 0 32px; }
