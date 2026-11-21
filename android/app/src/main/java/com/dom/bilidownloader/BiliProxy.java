@@ -63,10 +63,14 @@ public class BiliProxy {
         StringBuilder sb = new StringBuilder();
         String uid = "";
         for (Map.Entry<String, String> e : cookies.entrySet()) {
-            if (e.getValue() == null || e.getValue().isEmpty()) continue;
-            if (e.getKey().equalsIgnoreCase("DedeUserID")) uid = e.getValue();
+            String key = e.getKey();
+            String value = e.getValue();
+            if (key == null || value == null || value.isEmpty() || !key.matches("[A-Za-z0-9_]+")) continue;
+            // Cookie 来自页面输入，禁止分号与控制字符，避免拼接出额外请求头或额外 Cookie。
+            if (value.indexOf(';') >= 0 || value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0) continue;
+            if (key.equalsIgnoreCase("DedeUserID")) uid = value;
             if (sb.length() > 0) sb.append("; ");
-            sb.append(e.getKey()).append('=').append(e.getValue());
+            sb.append(key).append('=').append(value);
         }
         userCookie = sb.toString();
         userUid = uid;
@@ -382,8 +386,11 @@ public class BiliProxy {
                 }
                 try {
                     u = UrlPolicy.validate(u, "api").toString();
-                    ensureBuvid(false);
-                    Resp r = biliGet(u);   // 内建 412 递增退避 + 换身份重试
+                    // 身份接口偶发网页验证时仍尝试业务 API；已登录用户可只凭用户 Cookie 正常访问。
+                    try { ensureBuvid(false); } catch (IOException ignored) { }
+                    // playurl 的风控会参考 Referer：带上真实视频页可显著降低被当成盗链而返回 412 的概率。
+                    String referer = safePageReferer(queryParam(query, "ref"));
+                    Resp r = biliGet(u, referer);   // 内建 412 / -352 / 网页验证递增退避 + 换身份重试
                     res.status = r.status;
                     String ct = r.headers.get("content-type");
                     res.mime = (ct != null ? ct : "application/json") + "; charset=utf-8";
@@ -487,22 +494,37 @@ public class BiliProxy {
         throw new IOException("媒体重定向次数过多");
     }
 
-    private Resp biliGet(String url) throws IOException, InterruptedException {
+    /** 只接受 B 站自身的视频/番剧页面作为 Referer，避免页面参数被拼进请求头。 */
+    private static String safePageReferer(String value) {
+        if (value != null && value.matches("https://www\\.bilibili\\.com/(video/BV[0-9A-Za-z]{8,16}|bangumi/play/(ep|ss)[0-9]{1,12})"))
+            return value;
+        return "https://www.bilibili.com/";
+    }
+
+    private Resp biliGet(String url, String referer) throws IOException, InterruptedException {
         Resp r = null;
+        boolean lastHtml = false;
         for (int attempt = 0; attempt < 3; attempt++) {
             gate();
-            r = httpsGet(url, baseHeaders("https://www.bilibili.com/"));
-            if (r.status != 412) {
+            r = httpsGet(url, baseHeaders(referer));
+            String contentType = r.headers.get("content-type");
+            String prefix = new String(r.body, 0, Math.min(r.body.length, 128), StandardCharsets.UTF_8).trim();
+            lastHtml = (contentType != null && contentType.toLowerCase(java.util.Locale.ROOT).contains("text/html"))
+                    || prefix.startsWith("<!DOCTYPE") || prefix.startsWith("<html");
+            String bodyText = new String(r.body, StandardCharsets.UTF_8);
+            boolean riskJson = bodyText.contains("\"code\":-352") || bodyText.contains("\"code\": -352");
+            if (r.status != 412 && !lastHtml && !riskJson) {
                 if (attempt > 0) r.retried = true;
                 return r;
             }
-            // 412：先递增退避再换一次设备身份。不要每次 412 都立刻换新身份，
-            // 否则换身份请求本身也会加重风控，反而更容易持续 412。
+            if (attempt == 2) break;
+            // 412 / 网页验证：递增退避后重试；首次失败更新一次设备身份，避免无退避重复请求。
             Thread.sleep(1200L + 1800L * attempt);
             if (attempt == 0) {
                 try { resetBuvid(); } catch (IOException ignored) { }
             }
         }
+        if (lastHtml && (r == null || r.status != 412)) throw new IOException("B站接口返回网页验证，请稍后重试或登录后再试");
         if (r != null) r.retried = true;
         return r;
     }

@@ -5,6 +5,10 @@ import android.Manifest;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,12 +28,14 @@ import android.widget.Toast;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -307,30 +313,53 @@ public class MainActivity extends Activity {
         public void download(final String url, final String filename, final String cbId) {
             List<String> urls = new ArrayList<>();
             urls.add(url);
-            startDownload(urls, filename, cbId);
+            startDownload(urls, filename, cbId, null);
         }
 
         /** 主/备 CDN 顺序重试：页面用换行分隔多个候选地址。 */
         @JavascriptInterface
         public void downloadMulti(final String urls, final String filename, final String cbId) {
+            startDownload(splitUrls(urls), filename, cbId, null);
+        }
+
+        /** 带真实视频页 Referer 的直链下载：降低移动网络下 CDN 盗链误判（403/412）。 */
+        @JavascriptInterface
+        public void downloadMultiReferer(final String urls, final String filename, final String cbId, final String referer) {
+            startDownload(splitUrls(urls), filename, cbId, referer);
+        }
+
+        /** DASH 高清：分别下载视频轨和音频轨，再用系统 MediaMuxer 封装为 MP4。 */
+        @JavascriptInterface
+        public void muxDASH(final String videoUrls, final String audioUrls, final String filename, final String cbId) {
+            startMuxDownload(splitUrls(videoUrls), splitUrls(audioUrls), filename, cbId, null);
+        }
+
+        /** 带真实视频页 Referer 的 DASH 下载合并。 */
+        @JavascriptInterface
+        public void muxDASHReferer(final String videoUrls, final String audioUrls, final String filename, final String cbId, final String referer) {
+            startMuxDownload(splitUrls(videoUrls), splitUrls(audioUrls), filename, cbId, referer);
+        }
+
+        private List<String> splitUrls(String value) {
             List<String> list = new ArrayList<>();
-            if (urls != null) {
-                for (String s : urls.split("\n")) if (!s.trim().isEmpty()) list.add(s.trim());
+            if (value != null) {
+                for (String s : value.split("\n")) if (!s.trim().isEmpty()) list.add(s.trim());
             }
-            startDownload(list, filename, cbId);
+            return list;
         }
 
         private final Map<String, DownloadJob> jobs = new ConcurrentHashMap<>();
 
         private class DownloadJob {
             final String cbId;
+            final String referer;
             volatile boolean cancelled;
             volatile HttpURLConnection conn;
             volatile InputStream in;
             volatile OutputStream out;
             volatile PendingFile pending;
 
-            DownloadJob(String id) { cbId = id; }
+            DownloadJob(String id, String pageReferer) { cbId = id; referer = pageReferer; }
 
             void cancel() {
                 cancelled = true;
@@ -352,11 +381,13 @@ public class MainActivity extends Activity {
             for (DownloadJob job : jobs.values()) job.cancel();
             for (DownloadJob job : jobs.values()) if (job.pending != null) job.pending.delete();
             jobs.clear();
+            for (ChunkJob job : chunkJobs.values()) job.finish(false);
+            chunkJobs.clear();
         }
 
-        private void startDownload(final List<String> urls, final String filename, final String cbId) {
+        private void startDownload(final List<String> urls, final String filename, final String cbId, final String referer) {
             if (cbId == null || !cbId.matches("[a-zA-Z0-9_]+")) return;
-            DownloadJob job = new DownloadJob(cbId);
+            DownloadJob job = new DownloadJob(cbId, safePageReferer(referer));
             DownloadJob old = jobs.put(cbId, job);
             if (old != null) old.cancel();
             new Thread(() -> runDownload(job, urls, filename, cbId), "bili-download-" + cbId).start();
@@ -364,18 +395,40 @@ public class MainActivity extends Activity {
 
         private void runDownload(DownloadJob job, List<String> urls, String filename, String cbId) {
             String lastError = "下载失败";
+            boolean identityReset = false;
             try {
                 if (!hasStoragePermission()) throw new IOException("未授予存储权限，请允许后重试");
+                UrlPolicy.filename(filename);
                 if (urls.isEmpty()) throw new IOException("下载地址为空");
-                for (String url : urls) {
-                    if (job.cancelled) throw new IOException("已取消");
-                    try {
-                        downloadOne(job, url, filename);
-                        jsCall(cbId, "onDone", "true", "\"已保存到下载目录：" + filename + "\"");
-                        return;
-                    } catch (Exception error) {
-                        lastError = errorMessage(error);
+                for (int urlIndex = 0; urlIndex < urls.size(); urlIndex++) {
+                    String url = urls.get(urlIndex);
+                    boolean retriedCurrent = false;
+                    while (true) {
                         if (job.cancelled) throw new IOException("已取消");
+                        try {
+                            downloadOne(job, url, filename);
+                            jsCall(cbId, "onDone", "true", "\"已保存到下载目录：" + esc(filename) + "\"");
+                            return;
+                        } catch (Exception error) {
+                            lastError = errorMessage(error);
+                            if (job.cancelled) throw new IOException("已取消");
+                            // 真机常见 412：退避并更新一次设备身份；单地址也重试当前地址，多地址随后切换 CDN。
+                            if (lastError.startsWith("HTTP 412") && !identityReset) {
+                                identityReset = true;
+                                try { Thread.sleep(isLoopbackTestUrl(url) ? 20L : 1200L); } catch (InterruptedException interrupted) {
+                                    Thread.currentThread().interrupt();
+                                    throw new IOException("下载已中断");
+                                }
+                                if (!isLoopbackTestUrl(url)) {
+                                    try { proxy.resetBuvid(); } catch (Exception ignored) { }
+                                }
+                                if (!retriedCurrent) {
+                                    retriedCurrent = true;
+                                    continue;
+                                }
+                            }
+                            break;
+                        }
                     }
                 }
                 throw new IOException(lastError);
@@ -395,11 +448,16 @@ public class MainActivity extends Activity {
             PendingFile pf = null;
             boolean success = false;
             try {
-                conn = openMedia(url);
+                conn = openMedia(url, job.referer);
                 job.conn = conn;
                 int status = conn.getResponseCode();
                 if (status != 200 && status != 206) {
                     throw new IOException("HTTP " + status + "（" + conn.getURL().getHost() + "）");
+                }
+                String contentType = conn.getContentType();
+                if (contentType != null && (contentType.toLowerCase(java.util.Locale.ROOT).contains("text/html")
+                        || contentType.toLowerCase(java.util.Locale.ROOT).contains("json"))) {
+                    throw new IOException("CDN 返回了错误页面，未保存为视频（" + contentType + "）");
                 }
                 long total = conn.getContentLengthLong();
                 in = new BufferedInputStream(conn.getInputStream());
@@ -434,6 +492,7 @@ public class MainActivity extends Activity {
                 in.close();
                 in = null;
                 if (total >= 0 && got != total) throw new IOException("下载文件不完整（" + got + "/" + total + "）");
+                if (got <= 0) throw new IOException("下载内容为空，未保存文件");
                 pf.markDone();
                 if (total > 0) jsCall(job.cbId, "onProgress", "1.0", "");
                 success = true;
@@ -449,10 +508,283 @@ public class MainActivity extends Activity {
             }
         }
 
-        private HttpURLConnection openMedia(String value) throws IOException {
-            // 首次启动时后台预热可能尚未完成；下载前同步补一次 buvid，CDN 对无设备身份的请求更容易 403
-            try { proxy.ensureBuvid(false); } catch (IOException ignored) { }
-            String current = value;
+        private void startMuxDownload(final List<String> videoUrls, final List<String> audioUrls,
+                                      final String filename, final String cbId, final String referer) {
+            if (cbId == null || !cbId.matches("[a-zA-Z0-9_]+")) return;
+            DownloadJob job = new DownloadJob(cbId, safePageReferer(referer));
+            DownloadJob old = jobs.put(cbId, job);
+            if (old != null) old.cancel();
+            new Thread(() -> runMuxDownload(job, videoUrls, audioUrls, filename, cbId),
+                    "bili-mux-" + cbId).start();
+        }
+
+        /** 只接受 B 站自身的视频/番剧页面作为 Referer，避免页面传入任意请求头。 */
+        private static String safePageReferer(String value) {
+            if (value != null && value.matches("https://www\\.bilibili\\.com/(video/BV[0-9A-Za-z]{8,16}|bangumi/play/(ep|ss)[0-9]{1,12})"))
+                return value;
+            return "https://www.bilibili.com/";
+        }
+
+        private void runMuxDownload(DownloadJob job, List<String> videoUrls, List<String> audioUrls,
+                                    String filename, String cbId) {
+            File video = null;
+            File audio = null;
+            File muxed = null;
+            try {
+                if (!hasStoragePermission()) throw new IOException("未授予存储权限，请允许后重试");
+                UrlPolicy.filename(filename);
+                if (videoUrls.isEmpty() || audioUrls.isEmpty()) throw new IOException("高清视频轨或音频轨地址为空");
+                File dir = new File(getCacheDir(), "dash");
+                if (!dir.exists() && !dir.mkdirs()) throw new IOException("无法创建高清缓存目录");
+                String stem = "dash-" + cbId + "-" + System.nanoTime();
+                video = downloadTrack(job, videoUrls, new File(dir, stem + "-video.m4s"), 0.0, 0.42);
+                audio = downloadTrack(job, audioUrls, new File(dir, stem + "-audio.m4s"), 0.42, 0.82);
+                muxed = new File(dir, stem + "-muxed.mp4");
+                muxDashFiles(job, video, audio, muxed);
+                PendingFile pf = createPendingFile(filename);
+                job.pending = pf;
+                copyToPending(job, muxed, pf);
+                pf.markDone();
+                job.pending = null;
+                jsCall(cbId, "onProgress", "1.0", "");
+                jsCall(cbId, "onDone", "true", "\"已保存到下载目录：" + esc(filename) + "\"");
+            } catch (Exception error) {
+                if (job.pending != null) job.pending.delete();
+                jsCall(cbId, "onDone", "false", "\"" + esc(errorMessage(error)) + "\"");
+            } finally {
+                job.clearRefs();
+                jobs.remove(cbId, job);
+                deleteQuietly(video);
+                deleteQuietly(audio);
+                deleteQuietly(muxed);
+            }
+        }
+
+        private File downloadTrack(DownloadJob job, List<String> urls, File target,
+                                   double base, double end) throws IOException {
+            IOException last = new IOException("媒体地址为空");
+            boolean identityReset = false;
+            for (int urlIndex = 0; urlIndex < urls.size(); urlIndex++) {
+                String url = urls.get(urlIndex);
+                boolean retriedCurrent = false;
+                while (true) {
+                    if (job.cancelled) throw new IOException("已取消");
+                    try {
+                        downloadUrlToFile(job, url, target, base, end - base);
+                        return target;
+                    } catch (IOException error) {
+                        last = error;
+                        deleteQuietly(target);
+                        if (job.cancelled) throw new IOException("已取消");
+                        if (errorMessage(error).startsWith("HTTP 412") && !identityReset) {
+                            identityReset = true;
+                            try { Thread.sleep(1200L); } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("下载已中断");
+                            }
+                            try { proxy.resetBuvid(); } catch (Exception ignored) { }
+                            if (!retriedCurrent) {
+                                retriedCurrent = true;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            throw last;
+        }
+
+        private void downloadUrlToFile(DownloadJob job, String url, File target,
+                                       double base, double span) throws IOException {
+            HttpURLConnection conn = null;
+            InputStream in = null;
+            OutputStream out = null;
+            boolean success = false;
+            try {
+                conn = openMedia(url, job.referer);
+                job.conn = conn;
+                int status = conn.getResponseCode();
+                if (status != 200 && status != 206) throw new IOException("HTTP " + status + "（" + conn.getURL().getHost() + "）");
+                String contentType = conn.getContentType();
+                if (contentType != null && (contentType.toLowerCase(java.util.Locale.ROOT).contains("text/html")
+                        || contentType.toLowerCase(java.util.Locale.ROOT).contains("json"))) {
+                    throw new IOException("CDN 返回了错误页面（" + contentType + "）");
+                }
+                long total = conn.getContentLengthLong();
+                in = new BufferedInputStream(conn.getInputStream());
+                out = new FileOutputStream(target);
+                job.in = in;
+                job.out = out;
+                byte[] buf = new byte[64 * 1024];
+                long got = 0;
+                long lastMs = 0;
+                double lastFrac = -1;
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    if (job.cancelled) throw new IOException("已取消");
+                    out.write(buf, 0, n);
+                    got += n;
+                    if (total > 0) {
+                        double frac = (double) got / total;
+                        long now = System.currentTimeMillis();
+                        if (frac - lastFrac >= 0.01 || now - lastMs >= 250 || got == total) {
+                            lastFrac = frac;
+                            lastMs = now;
+                            jsCall(job.cbId, "onProgress", String.valueOf(base + Math.min(frac, 1.0) * span), "");
+                        }
+                    }
+                }
+                if (job.cancelled) throw new IOException("已取消");
+                out.flush();
+                out.close();
+                out = null;
+                if (total >= 0 && got != total) throw new IOException("媒体轨下载不完整（" + got + "/" + total + "）");
+                if (got <= 0) throw new IOException("媒体轨内容为空");
+                jsCall(job.cbId, "onProgress", String.valueOf(base + span), "");
+                success = true;
+            } finally {
+                closeQuietly(out);
+                closeQuietly(in);
+                if (conn != null) conn.disconnect();
+                job.out = null;
+                job.in = null;
+                job.conn = null;
+                if (!success) deleteQuietly(target);
+            }
+        }
+
+        private void muxDashFiles(DownloadJob job, File video, File audio, File output) throws IOException {
+            MediaExtractor videoExtractor = new MediaExtractor();
+            MediaExtractor audioExtractor = new MediaExtractor();
+            MediaMuxer muxer = null;
+            boolean started = false;
+            try {
+                videoExtractor.setDataSource(video.getAbsolutePath());
+                audioExtractor.setDataSource(audio.getAbsolutePath());
+                int videoSource = findTrack(videoExtractor, "video/");
+                int audioSource = findTrack(audioExtractor, "audio/");
+                MediaFormat videoFormat = videoExtractor.getTrackFormat(videoSource);
+                MediaFormat audioFormat = audioExtractor.getTrackFormat(audioSource);
+                muxer = new MediaMuxer(output.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                int videoTrack = muxer.addTrack(videoFormat);
+                int audioTrack = muxer.addTrack(audioFormat);
+                muxer.start();
+                started = true;
+                videoExtractor.selectTrack(videoSource);
+                copySamples(job, videoExtractor, muxer, videoTrack, videoFormat, 0.82, 0.06);
+                audioExtractor.selectTrack(audioSource);
+                copySamples(job, audioExtractor, muxer, audioTrack, audioFormat, 0.88, 0.06);
+                if (job.cancelled) throw new IOException("已取消");
+                muxer.stop();
+                started = false;
+                if (output.length() <= 0) throw new IOException("高清合并结果为空");
+                jsCall(job.cbId, "onProgress", "0.94", "");
+            } catch (RuntimeException error) {
+                throw new IOException("系统合并失败：" + errorMessage(error), error);
+            } finally {
+                if (muxer != null) {
+                    if (started) try { muxer.stop(); } catch (Exception ignored) { }
+                    try { muxer.release(); } catch (Exception ignored) { }
+                }
+                videoExtractor.release();
+                audioExtractor.release();
+                if (job.cancelled) deleteQuietly(output);
+            }
+        }
+
+        private int findTrack(MediaExtractor extractor, String prefix) throws IOException {
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                String mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith(prefix)) return i;
+            }
+            throw new IOException("媒体中缺少" + ("video/".equals(prefix) ? "视频轨" : "音频轨"));
+        }
+
+        private void copySamples(DownloadJob job, MediaExtractor extractor, MediaMuxer muxer,
+                                 int track, MediaFormat format, double base, double span) throws IOException {
+            ByteBuffer buffer = ByteBuffer.allocate(4 * 1024 * 1024);
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            long duration = format.containsKey(MediaFormat.KEY_DURATION) ? format.getLong(MediaFormat.KEY_DURATION) : -1;
+            long lastMs = 0;
+            double lastFrac = -1;
+            while (true) {
+                if (job.cancelled) throw new IOException("已取消");
+                int size = extractor.readSampleData(buffer, 0);
+                if (size < 0) break;
+                info.offset = 0;
+                info.size = size;
+                info.presentationTimeUs = extractor.getSampleTime();
+                info.flags = extractor.getSampleFlags();
+                muxer.writeSampleData(track, buffer, info);
+                if (duration > 0 && info.presentationTimeUs >= 0) {
+                    double frac = Math.min((double) info.presentationTimeUs / duration, 1.0);
+                    long now = System.currentTimeMillis();
+                    if (frac - lastFrac >= 0.02 || now - lastMs >= 250) {
+                        lastFrac = frac;
+                        lastMs = now;
+                        jsCall(job.cbId, "onProgress", String.valueOf(base + frac * span), "");
+                    }
+                }
+                extractor.advance();
+            }
+        }
+
+        private void copyToPending(DownloadJob job, File source, PendingFile pf) throws IOException {
+            InputStream in = null;
+            OutputStream out = null;
+            try {
+                in = new BufferedInputStream(new FileInputStream(source));
+                out = pf.open();
+                job.in = in;
+                job.out = out;
+                long total = source.length();
+                long got = 0;
+                long lastMs = 0;
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    if (job.cancelled) throw new IOException("已取消");
+                    out.write(buf, 0, n);
+                    got += n;
+                    long now = System.currentTimeMillis();
+                    if (total > 0 && now - lastMs >= 250) {
+                        lastMs = now;
+                        jsCall(job.cbId, "onProgress", String.valueOf(0.94 + Math.min((double) got / total, 1.0) * 0.06), "");
+                    }
+                }
+                out.flush();
+                if (total != got || got <= 0) throw new IOException("保存合并文件不完整");
+            } finally {
+                closeQuietly(out);
+                closeQuietly(in);
+                job.out = null;
+                job.in = null;
+            }
+        }
+
+        private void deleteQuietly(File file) {
+            if (file != null && file.exists()) try { file.delete(); } catch (Exception ignored) { }
+        }
+
+        private boolean isLoopbackTestUrl(String value) {
+            if (!BuildConfig.DEBUG) return false;
+            try {
+                String host = new URL(value).getHost();
+                return host.equals("127.0.0.1") || host.equals("localhost") || host.equals("::1");
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+
+        private HttpURLConnection openMedia(String value, String referer) throws IOException {
+            URL initial = UrlPolicy.validate(value, "media");
+            boolean loopbackTest = isLoopbackTestUrl(value);
+            // 首次启动时后台预热可能尚未完成；下载前同步补一次 buvid，CDN 对无设备身份的请求更容易 403。
+            if (!loopbackTest) {
+                try { proxy.ensureBuvid(false); } catch (IOException ignored) { }
+            }
+            String current = initial.toString();
             for (int depth = 0; depth <= 5; depth++) {
                 URL target = UrlPolicy.validate(current, "media");
                 HttpURLConnection conn = (HttpURLConnection) target.openConnection();
@@ -461,7 +793,7 @@ public class MainActivity extends Activity {
                 conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("GET");
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
-                conn.setRequestProperty("Referer", "https://www.bilibili.com/");
+                conn.setRequestProperty("Referer", referer == null ? "https://www.bilibili.com/" : referer);
                 conn.setRequestProperty("Origin", "https://www.bilibili.com");
                 conn.setRequestProperty("Accept-Encoding", "identity");
                 try {
@@ -491,67 +823,86 @@ public class MainActivity extends Activity {
         public void cancelDownload(String cbId) {
             DownloadJob job = jobs.get(cbId);
             if (job != null) job.cancel();
+            if (chunkJobs.containsKey(cbId)) saveFinish(cbId, false);
         }
 
-        /** MP3 转码结果分段保存：开始 */
-        private OutputStream chunkOs;
-        private PendingFile chunkPf;
-        private String chunkFilename;
-        private boolean chunkFailed;
+        /** MP3 / JSON 等分段保存：按 cbId 隔离，多个任务同时保存不会互相覆盖。 */
+        private class ChunkJob {
+            final String filename;
+            final PendingFile pending;
+            OutputStream out;
+            boolean failed;
+            ChunkJob(String name, PendingFile file, OutputStream stream) {
+                filename = name;
+                pending = file;
+                out = stream;
+            }
+            synchronized boolean append(String b64) {
+                if (out == null || failed) return false;
+                try {
+                    byte[] data = Base64.decode(b64, Base64.NO_WRAP);
+                    out.write(data);
+                    return true;
+                } catch (Exception error) {
+                    failed = true;
+                    return false;
+                }
+            }
+            synchronized boolean finish(boolean ok) {
+                boolean success = false;
+                try {
+                    if (out != null) {
+                        out.flush();
+                        out.close();
+                        out = null;
+                    }
+                    if (ok && !failed) {
+                        pending.markDone();
+                        success = true;
+                    }
+                } catch (Exception error) {
+                    success = false;
+                } finally {
+                    closeQuietly(out);
+                    out = null;
+                    if (!success) pending.delete();
+                }
+                return success;
+            }
+        }
+        private final Map<String, ChunkJob> chunkJobs = new ConcurrentHashMap<>();
 
         @JavascriptInterface
-        public void saveStart(final String filename, final int totalChunks, final String cbId) {
+        public boolean saveStart(final String filename, final int totalChunks, final String cbId) {
+            if (cbId == null || !cbId.matches("[a-zA-Z0-9_]+")) return false;
+            ChunkJob old = chunkJobs.remove(cbId);
+            if (old != null) old.finish(false);
             try {
-                closeQuietly(chunkOs);
-                chunkOs = null;
-                if (chunkPf != null) { chunkPf.delete(); chunkPf = null; }
-                chunkFilename = filename;
-                chunkFailed = false;
-                chunkPf = createPendingFile(filename);
-                chunkOs = chunkPf.open();
+                PendingFile pf = createPendingFile(filename);
+                ChunkJob job = new ChunkJob(filename, pf, pf.open());
+                chunkJobs.put(cbId, job);
                 jsCall(cbId, "onProgress", "0", "");
+                return true;
             } catch (Exception e) {
-                if (chunkPf != null) { chunkPf.delete(); chunkPf = null; }
-                chunkOs = null;
-                jsCall(cbId, "onDone", "false", "\"无法创建文件\"");
+                jsCall(cbId, "onDone", "false", "\"无法创建文件：" + esc(errorMessage(e)) + "\"");
+                return false;
             }
         }
 
         /** 写入失败返回 false，页面立即终止并触发 saveFinish(false)，避免截断文件被标记完成。 */
         @JavascriptInterface
-        public boolean saveChunk(final String b64) {
-            if (chunkOs == null || chunkFailed) return false;
-            try {
-                byte[] data = Base64.decode(b64, Base64.DEFAULT);
-                chunkOs.write(data);
-                return true;
-            } catch (Exception e) {
-                chunkFailed = true;
-                return false;
-            }
+        public boolean saveChunk(final String cbId, final String b64) {
+            ChunkJob job = chunkJobs.get(cbId);
+            return job != null && job.append(b64);
         }
 
         @JavascriptInterface
         public void saveFinish(final String cbId, final boolean ok) {
-            boolean success = false;
-            try {
-                if (chunkOs != null) { chunkOs.flush(); chunkOs.close(); chunkOs = null; }
-                if (ok && !chunkFailed && chunkPf != null) {
-                    chunkPf.markDone();
-                    success = true;
-                }
-            } catch (Exception e) {
-                success = false;
-            } finally {
-                closeQuietly(chunkOs);
-                chunkOs = null;
-                if (!success && chunkPf != null) chunkPf.delete();
-                chunkPf = null;
-                String name = chunkFilename;
-                chunkFilename = null;
-                jsCall(cbId, "onDone", success ? "true" : "false",
-                        success ? "\"已保存到下载目录：" + name + "\"" : "\"保存失败\"");
-            }
+            ChunkJob job = chunkJobs.remove(cbId);
+            if (job == null) return;
+            boolean success = job.finish(ok);
+            jsCall(cbId, "onDone", success ? "true" : "false",
+                    success ? "\"已保存到下载目录：" + esc(job.filename) + "\"" : "\"保存失败\"");
         }
 
         private String errorMessage(Exception e) {

@@ -6,4 +6,4 @@
 
 先在根目录执行 `npm run assets:android`，再在此目录执行 `gradlew.bat :app:assembleDebug`（Windows）或 `bash ./gradlew :app:assembleDebug`（Linux / macOS）。
 
-前端源文件位于根目录，请勿单独修改 `app/src/main/assets/`。当前不包含原生 DASH 合并，也不包含发布签名密钥。
+前端源文件位于根目录，请勿单独修改 `app/src/main/assets/`。当前包含原生 DASH 双轨下载与 MediaMuxer 合并；playurl / CDN 请求带真实视频页 Referer，遇 412 会换身份重试，高清合并失败或无独立音频轨时自动回退兼容 MP4 直链。不包含发布签名密钥。

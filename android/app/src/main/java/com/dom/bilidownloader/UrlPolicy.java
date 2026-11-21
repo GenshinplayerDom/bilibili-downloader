@@ -15,6 +15,11 @@ final class UrlPolicy {
     static URL validate(String value, String kind) throws IOException {
         URL url = new URL(value.startsWith("//") ? "https:" + value : value);
         if (url.getUserInfo() != null) throw new IOException("不允许的地址");
+        String rawHost = url.getHost().toLowerCase(java.util.Locale.ROOT);
+        // 仅供 androidTest 在本机回环地址验证真实下载链路；Release 编译下永不放行。
+        if (BuildConfig.DEBUG && kind.equals("media")
+                && (rawHost.equals("127.0.0.1") || rawHost.equals("localhost") || rawHost.equals("::1"))
+                && (url.getProtocol().equals("http") || url.getProtocol().equals("https"))) return url;
         // 端口策略与桌面版一致：media（CDN 直链）可能带随机端口（如 *.edge.mountaintoys.cn:4483），
         // api / expand 必须走标准 443，避免把代理当成端口探测工具。
         if (!kind.equals("media") && url.getPort() != -1 && url.getPort() != 443) throw new IOException("不允许的端口");
