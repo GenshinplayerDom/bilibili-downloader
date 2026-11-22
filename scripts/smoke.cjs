@@ -513,6 +513,8 @@ const { execFileSync } = require('node:child_process');
     assert.equal(await page.locator('#pgc-search-page').isHidden(), true, 'UP 主频道不应复用番剧搜索页');
     assert.equal(await page.locator('.content-tab[data-content="up"]').getAttribute('aria-selected'), 'true');
     assert.match(await page.locator('#up-search-input').getAttribute('placeholder'), /UP 主/, 'UP 主频道应有独立搜索框');
+    const upWideBox = await page.locator('#up-search-page').boundingBox();
+    assert.ok(upWideBox && upWideBox.width >= 900, 'UP 页应使用桌面宽版布局，实际 ' + (upWideBox && upWideBox.width));
     await page.locator('#up-search-input').fill('影视飓风');
     await page.locator('#up-search-btn').click();
     await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .up-result-card').length === 2, null, { timeout: 15000 });
@@ -536,6 +538,13 @@ const { execFileSync } = require('node:child_process');
     assert.equal(await page.locator('#up-back').isVisible(), true, '投稿页应能返回 UP 主搜索结果');
     assert.match(await page.locator('#up-result-grid .pgc-result-card').nth(1).innerText(), /1:02:03/, '投稿时长应按 h:mm:ss 展示');
     await captureWindow('up-videos.png', 1160);
+    // 窄窗口下左侧固定操作栏不能压住 UP 页内容
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(800, 700));
+    await page.waitForTimeout(250);
+    const upNarrowBox = await page.locator('#up-search-page').boundingBox();
+    const railBox = await page.locator('#theme-toggle-btn').boundingBox();
+    assert.ok(upNarrowBox && railBox && upNarrowBox.x >= railBox.x + railBox.width + 4,
+      '窄窗口下 UP 页应为左侧操作栏预留间距，实际页 x=' + (upNarrowBox && upNarrowBox.x));
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
     await page.locator('#up-back').click();
     await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .up-result-card').length === 2, null, { timeout: 10000 });

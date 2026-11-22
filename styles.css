@@ -1382,7 +1382,8 @@ body[data-content-mode="hot"] .container { max-width: 1180px; }
 .video-workspace { display: flex; flex-direction: column; gap: 10px; }
 .video-workspace[hidden] { display: none; }
 body[data-content-mode="bangumi"] .container,
-body[data-content-mode="movie"] .container { max-width: 1040px; }
+body[data-content-mode="movie"] .container,
+body[data-content-mode="up"] .container { max-width: 1040px; }
 
 /* 番剧 / 电影独立搜索页 */
 .pgc-search-page {
@@ -1692,12 +1693,20 @@ body[data-content-mode="movie"] .container { max-width: 1040px; }
 .list-options label { font-size: 12px; color: var(--muted, #888); margin-right: 4px; }
 .list-options select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border, #d9dce6); background: var(--card); font-size: 12px; }
 
+@media (max-width: 1180px) {
+  /* UP 页使用桌面宽度后，左侧固定记录/设置栏会压住内容；预留两侧安全边距。 */
+  body[data-content-mode="up"] .container { padding-left: 72px; padding-right: 72px; }
+}
 @media (max-width: 1020px) {
   .hot-grid { gap: 14px; }
   .hot-hero { padding: 22px 24px; }
 }
 @media (max-width: 760px) {
   body[data-content-mode="hot"] .container { max-width: 100%; }
+  .up-search-page .pgc-search-hero { padding: 22px 20px 18px; }
+  .up-result-card { gap: 10px; padding: 12px; }
+  .up-avatar { width: 52px; height: 52px; }
+  .up-open { font-size: 11px; }
   .hot-hero { flex-direction: column; align-items: flex-start; gap: 16px; min-height: auto; }
   .hot-hero-actions { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
   .hot-hero h2 { font-size: 24px; }
