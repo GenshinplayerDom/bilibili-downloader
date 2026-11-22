@@ -1,6 +1,6 @@
 # 哔哩下载器 · GenshinplayerDom
 
-B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.10**（本地修复构建，GitHub Release 待发布；线上最新发布 v1.8.8）。作者 GenshinplayerDom，MIT License。
+B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.10**（线上最新发布 v1.8.10；上一版 v1.8.9 也已发布）。作者 GenshinplayerDom，MIT License。
 
 > 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 
@@ -23,16 +23,14 @@ B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 W
 
 ## 下载与安装
 
-最新版本：**[v1.8.8](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
+最新版本：**[v1.8.10](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.10)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
 
 | 文件 | 适用场景 | 大小 |
 | --- | --- | --- |
-| [BiliDownloader-1.8.8-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.8/BiliDownloader-1.8.8-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
-| [BiliDownloader-1.8.8-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.8/BiliDownloader-1.8.8-x64-portable.zip) | 64 位免安装便携版 | 180MB |
-| [BiliDownloader-1.8.8-ia32-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.8/BiliDownloader-1.8.8-ia32-Setup.exe) | 32 位 Windows 安装版 | 117MB |
-| [BiliDownloader-1.8.8-ia32-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.8/BiliDownloader-1.8.8-ia32-portable.zip) | 32 位免安装便携版 | 118MB |
+| [BiliDownloader-1.8.10-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.10/BiliDownloader-1.8.10-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
+| [BiliDownloader-1.8.10-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.10/BiliDownloader-1.8.10-x64-portable.zip) | 64 位免安装便携版 | 179MB |
 
-> 32 位版本使用 Electron 22（Chromium 108），功能与 64 位一致但内核较旧，建议 64 位系统优先选 x64。
+> 本轮发布 64 位版本；32 位版本未随 1.8.10 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
 > 安装版与便携版都内置 FFmpeg，无需额外安装；便携版解压即用，配置与下载记录仍写在用户目录。
 
 ## 现有功能
