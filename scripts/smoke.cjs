@@ -234,6 +234,13 @@ const { execFileSync } = require('node:child_process');
     // PGC 的 duration 是毫秒：600000ms 必须显示成 10:00，而不是 166 小时
     assert.match(await page.locator('#pgc-ep-list .pgc-ep').first().innerText(), /10:00/, '剧集时长应按秒格式化');
     assert.match(await page.locator('#pgc-selected').innerText(), /05:00/, '默认选中的第 3 集应显示自己的时长');
+    // 底部操作栏必须为右下角队列小球让位，且保持紧凑，不能盖住「下载本集」
+    const actionBox = await page.locator('.pgc-actionbar').boundingBox();
+    const orbBox = await page.locator('#queue-orb').boundingBox();
+    assert.ok(actionBox && orbBox, '番剧页底部操作栏与队列小球都应可见');
+    assert.ok(actionBox.x + actionBox.width <= orbBox.x - 4 || actionBox.y >= orbBox.y + orbBox.height + 4,
+      '底部操作栏不得与右下角队列小球重叠');
+    assert.ok(actionBox.height <= 72, '底部操作栏应保持单行紧凑高度，实际 ' + actionBox.height);
 
     // 切集时旧的分片区间必须失效，否则会按上一集的时间轴去截取
     await page.locator('#pgc-clip').fill('00:01-00:02');
@@ -249,6 +256,12 @@ const { execFileSync } = require('node:child_process');
     // 番剧页是 z-index:75 的全屏覆盖层：下载队列必须同样盖在详情页上方，
     // 打开后能看到新任务的进度，而不是被详情页遮住。
     await openQueue();
+    const queueBlur = await page.evaluate(() => {
+      const panel = document.getElementById('queue-panel');
+      const style = getComputedStyle(panel);
+      return style.backdropFilter || style.webkitBackdropFilter || '';
+    });
+    assert.match(queueBlur, /blur/, '下载队列浮层应使用毛玻璃虚化背景');
     const taskCardVisible = await page.evaluate(() => {
       const cards = Array.from(document.querySelectorAll('#queue-list .task-card'));
       const card = cards[cards.length - 1];
@@ -277,7 +290,12 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#pgc-download-all').click();
     await page.locator('#batch-panel').waitFor({ state: 'visible', timeout: 10000 });
     await page.locator('#batch-start').click();
-    await page.waitForFunction(() => /批量下载完成/.test(document.body.innerText), null, { timeout: 60000 });
+    // 整季 3 集必须一次性全部入队并同时开跑，不能只启动第 1 集后串行等待
+    await page.waitForFunction(() => document.querySelectorAll('#queue-list .task-card').length >= 4, null, { timeout: 5000 });
+    await openQueue();
+    await page.screenshot({ path: path.join(root, 'artifacts/pgc-batch-concurrent.png'), fullPage: false });
+    await closeQueue();
+    await page.waitForFunction(() => /批量下载已全部结束/.test(document.body.innerText), null, { timeout: 60000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length >= mp4Before + 3, '整季批量应下载 3 集');
     assert.equal(new Set(upstreamUrls.filter(u => u.includes('/pgc/player/web/playurl')).map(u => (/ep_id=(\d+)/.exec(u) || [])[1])).size, 3, '三个剧集应分别带自己的 ep_id 取流');
     await page.locator('#batch-back').click();

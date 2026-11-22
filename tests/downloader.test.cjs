@@ -7,13 +7,13 @@ const http = require('node:http');
 const { once } = require('node:events');
 const { Downloader, DownloadControl } = require('../lib/downloader');
 
-async function fixture(t, handler) {
+async function fixture(t, handler, options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bili-download-test-'));
   const server = http.createServer(handler);
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fs.rmSync(dir, { recursive: true, force: true }); });
   const base = 'http://127.0.0.1:' + server.address().port;
-  const downloader = new Downloader({ request: http.request, validate: value => new URL(value), chunkSize: 1024, retryDelay: 1, timeout: 2000, connections: 3 });
+  const downloader = new Downloader({ request: http.request, validate: value => new URL(value), chunkSize: options.chunkSize || 1024, retryDelay: 1, timeout: 2000, connections: options.connections || 3 });
   return { dir, base, downloader, dest: path.join(dir, 'result.mp4') };
 }
 function serve(data, req, res) {
@@ -30,6 +30,22 @@ test('parallel download preserves exact bytes and cleans temporary parts', { tim
   const size = await f.downloader.download([f.base], f.dest, { threads: 8 });
   assert.equal(size.size, data.length); assert.deepEqual(fs.readFileSync(f.dest), data);
   assert.deepEqual(fs.readdirSync(f.dir), ['result.mp4']);
+});
+test('threads actually open multiple range requests at the same time', { timeout: 5000 }, async t => {
+  let active = 0, maxActive = 0, chunks = 0;
+  const f = await fixture(t, (req, res) => {
+    const range = /bytes=(\d+)-(\d+)/.exec(req.headers.range || '');
+    if (!range || (range[1] === '0' && range[2] === '0')) return serve(data, req, res);   // 先响应大小探测
+    chunks++; active++; maxActive = Math.max(maxActive, active);
+    let discharged = false;
+    const release = () => { if (discharged) return; discharged = true; active--; };
+    const timer = setTimeout(() => { serve(data, req, res); release(); }, 40);
+    res.on('close', () => { clearTimeout(timer); release(); });
+  }, { connections: 8 });
+  await f.downloader.download(f.base, f.dest, { threads: 8 });
+  assert.equal(chunks, 6, '6000 字节按 1024 分片应产生 6 个 Range 请求');
+  assert.ok(maxActive >= 4, '多线程下载应同时发起至少 4 个 Range 请求，实际峰值 ' + maxActive);
+  assert.deepEqual(fs.readFileSync(f.dest), data);
 });
 test('server without Range support downloads once as a full stream', { timeout: 5000 }, async t => {
   const f = await fixture(t, (req, res) => { res.writeHead(200, { 'Content-Length': data.length }); res.end(data); });

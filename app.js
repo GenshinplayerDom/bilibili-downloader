@@ -3403,12 +3403,12 @@
     showToast(count ? ('已继续 ' + count + ' 个下载任务') : '当前没有已暂停的任务', count ? 'ok' : 'warn');
   }
 
-  function createTask(name, badge) {
+  function createTask(name, badge, sourceOverride) {
     taskSeq++;
     var t = {
       id: taskSeq,
-      source: JSON.parse(JSON.stringify(current)),
-      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: fmtSelect ? fmtSelect.value : 'mp4', clip: clipInput ? clipInput.value : '', af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku ? extraDanmaku.checked : false, subtitle: extraSub ? extraSub.checked : false, audioPref: (current && current.kind === 'bangumi' && $('pgc-audio')) ? $('pgc-audio').value : 'high' },
+      source: JSON.parse(JSON.stringify(sourceOverride || current)),
+      settings: { qn: Number(qnSelect.value), threads: currentThreads(), enc: encSelect.value || 'auto', format: fmtSelect ? fmtSelect.value : 'mp4', clip: clipInput ? clipInput.value : '', af: afSelect.value, aq: Number(aqSelect.value), danmaku: extraDanmaku ? extraDanmaku.checked : false, subtitle: extraSub ? extraSub.checked : false, audioPref: ((sourceOverride || current) && (sourceOverride || current).kind === 'bangumi' && $('pgc-audio')) ? $('pgc-audio').value : 'high' },
       name: name,
       badge: badge,
       status: 'running',
@@ -5130,14 +5130,14 @@
     if (type === 'audio') return downloadAudio(t);
     return downloadVideo(t);
   }
-  // 打开批量下载面板（替换主界面），列出全部任务供预览，点击「开始」后顺序执行
+  // 打开批量下载面板（替换主界面），列出全部任务供预览，点击「开始」后并发入队
   function openBatchPanel() {
     if (!current) return;
     var isSeason = current.kind === 'bangumi';
     var list = isSeason ? (current.episodes || []) : (current.pages || []);
     if (!list.length) { showToast('无可批量下载的 P / 集', 'warn'); return; }
     batchData = { list: list, isSeason: isSeason };
-    var sub = (isSeason ? '番剧 ' : '分P / 收藏夹 ') + list.length + ' 个任务，将按顺序逐个下载。批量下载不支持片段裁剪与附带弹幕/字幕。';
+    var sub = (isSeason ? '番剧 ' : '分P / 收藏夹 ') + list.length + ' 个任务，将按并发上限同时下载（当前最多 ' + maxConcurrent + ' 项），其余自动排队。批量下载不支持片段裁剪与附带弹幕/字幕。';
     if (batchSub) batchSub.textContent = sub;
     // 同步当前全局清晰度/线程等选项到批量面板
     if (batchQn) {
@@ -5219,7 +5219,7 @@
       batchList.appendChild(row);
     }
   }
-  // 批量开始：把面板选项同步到全局，再顺序执行
+  // 批量开始：为每集生成独立 source 快照，全部并发入队，由全局调度器控制并发上限
   function startBatch() {
     if (!batchData || batchStarted || batchActive) return;
     var type = (batchTypeSeg.querySelector('.seg-btn.active') || { dataset: { type: 'video' } }).dataset.type || 'video';
@@ -5245,82 +5245,105 @@
     if (batchStart) batchStart.disabled = true;
     var list = batchData.list;
     var n = list.length;
-    var snap = { bvid: current.bvid, aid: current.aid, cid: current.cid, epId: current.epId, pageIndex: current.pageIndex };
-    var states = list.map(function () { return { status: 'queued' }; });
-    renderBatchList(states);
-    showToast('⏳ 开始批量下载 ' + n + ' 个任务（顺序执行）', 'warn');
-    var i = 0;
-    var waitDone = function (t, rowIdx, cb) {
-      if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') { cb(); return; }
-      var iv = setInterval(function () {
-        if (t.status === 'done' || t.status === 'error' || t.status === 'cancelled') {
-          clearInterval(iv);
-          states[rowIdx] = { status: t.status };
-          renderBatchList(states);
-          cb();
-        } else {
-          // 排队等待中实时显示
-          var cur = states[rowIdx] ? states[rowIdx].status : '';
-          if (t.status === 'queued' && cur !== 'queued') { states[rowIdx] = { status: 'queued', note: '等待中（并发上限 ' + maxConcurrent + '）' }; renderBatchList(states); }
-          else if (t.status === 'running' && cur === 'queued') { states[rowIdx] = { status: 'running' }; renderBatchList(states); }
-        }
-      }, 300);
+    var baseSource = JSON.parse(JSON.stringify(current));
+    var pref = {
+      qn: Number(batchQn && batchQn.value) || Number(qnSelect.value) || 80,
+      threads: Number(batchThread && batchThread.value) || currentThreads(),
+      enc: (batchEnc && batchEnc.value) || 'auto',
+      format: (batchFmt && batchFmt.value) || 'mp4',
+      clip: '',
+      af: (batchAf && batchAf.value) || 'm4a',
+      aq: Number(batchAq && batchAq.value) || 192,
+      danmaku: false,
+      subtitle: false,
+      audioPref: (batchData.isSeason && $('pgc-audio')) ? $('pgc-audio').value : 'high'
     };
-    var next = function () {
-      if (i >= n) {
-        current.bvid = snap.bvid; current.aid = snap.aid; current.cid = snap.cid;
-        current.epId = snap.epId; current.pageIndex = snap.pageIndex;
-        batchActive = false;
-        if (batchStart) { batchStart.disabled = false; batchStart.textContent = '全部完成，可返回重新下载'; }
-        showToast('✅ 批量下载完成（' + n + ' 个任务）', 'ok');
+    var states = list.map(function () { return { status: 'queued' }; });
+    var finished = 0;
+    renderBatchList(states);
+
+    var finishOne = function () {
+      finished++;
+      if (finished < n) return;
+      batchActive = false;
+      if (batchStart) { batchStart.disabled = false; batchStart.textContent = '全部完成，可返回重新下载'; }
+      showToast('✅ 批量下载已全部结束（' + n + ' 个任务）', 'ok');
+    };
+
+    // 监听单个任务状态；任务取消后会被移出 tasks 列表，因此同时检查 cancelled 标记
+    var watchTask = function (t, rowIdx) {
+      var stopped = false;
+      var tick = function () {
+        if (stopped) return;
+        var terminal = t.status === 'done' || t.status === 'error' || t.status === 'cancelled';
+        if (terminal || t.cancelled) {
+          stopped = true;
+          clearInterval(iv);
+          states[rowIdx] = { status: terminal ? t.status : 'cancelled' };
+          renderBatchList(states);
+          finishOne();
+          return;
+        }
+        var shown = states[rowIdx] ? states[rowIdx].status : '';
+        if (shown !== t.status) {
+          states[rowIdx] = { status: t.status, note: t.status === 'queued' ? '等待中（并发上限 ' + maxConcurrent + '）' : '' };
+          renderBatchList(states);
+        }
+      };
+      var iv = setInterval(tick, 250);
+      tick();
+    };
+
+    var startItem = function (p, rowIdx, label) {
+      var source = JSON.parse(JSON.stringify(baseSource));
+      source.bvid = p.bvid || baseSource.bvid;
+      source.aid = p.aid || baseSource.aid;
+      source.cid = p.cid || null;
+      source.epId = batchData.isSeason ? (p.ep_id || p.id || null) : null;
+      source.pageIndex = rowIdx;
+      var t = createTask(safeName(baseSource.title) + ' [' + label + ']', batchData.isSeason ? (baseSource.isMovie ? '电影' : '番剧') : '分P', source);
+      t.type = type;
+      t._part = ' [' + label + ']';
+      t.settings = Object.assign({}, pref);
+      states[rowIdx] = { status: 'running' };
+      renderBatchList(states);
+      try {
+        queueTask(t, function () { runTaskByType(t); });
+      } catch (e) {
+        setTaskStatus(t, 'error', '启动失败');
+        setTaskNote(t, 'fail', e && e.message ? e.message : '未知错误');
+        states[rowIdx] = { status: 'error', note: '启动失败' };
+        renderBatchList(states);
+        finishOne();
         return;
       }
-      var p = list[i];
-      var rowIdx = i;
-      i++;
-      current.bvid = p.bvid || snap.bvid;
-      current.aid = p.aid || snap.aid;
-      current.cid = p.cid;
-      current.epId = p.ep_id || p.id || null;   // 番剧剧集需要 ep_id 才能走 PGC 取流
-      current.pageIndex = rowIdx;
+      watchTask(t, rowIdx);
+    };
+
+    var enqueueItem = function (p, rowIdx) {
       var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
       // 合集 API 不返回 cid：先补全（含标题/时长）再开始下载，避免任务启动即失败
-      var prepare = Promise.resolve();
       if (!p.cid && p.bvid) {
-        prepare = viewByVideo({ bvid: p.bvid, aid: p.aid }).then(function (d) {
+        states[rowIdx] = { status: 'queued', note: '正在获取视频信息…' };
+        renderBatchList(states);
+        viewByVideo({ bvid: p.bvid, aid: p.aid }).then(function (d) {
           if (!d || !d.cid) throw new Error('未获取到该视频信息');
-          p.cid = d.cid; current.cid = d.cid;
-          if (d.aid) { p.aid = d.aid; current.aid = d.aid; }
+          p.cid = d.cid;
+          if (d.aid) p.aid = d.aid;
           if (!batchData.isSeason) label = 'P' + p.page + ' · ' + (d.title || p.part || '');
+          startItem(p, rowIdx, label);
         }).catch(function (e) {
           states[rowIdx] = { status: 'error', note: (e && e.message ? e.message : '获取视频信息失败') };
           renderBatchList(states);
-          throw e;
+          finishOne();
         });
+        return;
       }
-      prepare.then(function () {
-        var t = createTask(safeName(current.title) + ' [' + label + ']', batchData.isSeason ? (current.isMovie ? '电影' : '番剧') : '分P');
-        t.type = type;
-        t._part = ' [' + label + ']';
-        t.settings.clip = '';            // 批量不支持片段裁剪
-        t.settings.danmaku = false;      // 批量界面无附带选项
-        t.settings.subtitle = false;
-        t.settings.format = fmtSelect ? fmtSelect.value : 'mp4';
-        states[rowIdx] = { status: 'running' };
-        renderBatchList(states);
-        try {
-          queueTask(t, function () { runTaskByType(t); });
-        } catch (e2) {
-          setTaskStatus(t, 'error', '启动失败');
-          setTaskNote(t, 'fail', e2 && e2.message ? e2.message : '未知错误');
-        }
-        waitDone(t, rowIdx, next);
-      }).catch(function () {
-        // 补 cid 失败：跳过该任务继续下一个
-        waitDone({ status: 'error' }, rowIdx, next);
-      });
+      startItem(p, rowIdx, label);
     };
-    next();
+
+    showToast('⏳ 已加入 ' + n + ' 个下载任务（同时最多 ' + maxConcurrent + ' 项，其余自动排队）', 'ok');
+    for (var i = 0; i < n; i++) enqueueItem(list[i], i);
   }
   if (btnAll) {
     btnAll.addEventListener('click', openBatchPanel);
@@ -5660,7 +5683,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.8';
+  var APP_VERSION = '1.8.9';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
