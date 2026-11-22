@@ -81,6 +81,20 @@
   var videoWorkspace = $('video-workspace');
   var hotPage = $('hot-page');
   var hotGrid = $('hot-grid');
+  var hotWatch = $('hot-watch');
+  var hotVideo = $('hot-video');
+  var hotWatchLoading = $('hot-watch-loading');
+  var hotWatchTitle = $('hot-watch-title');
+  var hotWatchMeta = $('hot-watch-meta');
+  var hotWatchClose = $('hot-watch-close');
+  var hotTypeSeg = $('hot-type-seg');
+  var hotQn = $('hot-qn');
+  var hotFmt = $('hot-fmt');
+  var hotThread = $('hot-thread');
+  var hotDlSize = $('hot-dl-size');
+  var hotDownloadBtn = $('hot-download');
+  var hotOpenDetail = $('hot-open-detail');
+  var hotWatchState = { item: null, current: null, loading: false, requestId: 0 };
   var hotRefresh = $('hot-refresh');
   var hotRefreshText = $('hot-refresh-text');
   var hotStatus = $('hot-status');
@@ -157,6 +171,7 @@
   var batchPanel = $('batch-panel');
   var batchList = $('batch-list');
   var batchStart = $('batch-start');
+  var batchDownloadAll = $('batch-download-all');
   var batchBack = $('batch-back');
   var batchSub = $('batch-sub');
   var batchTypeSeg = $('batch-type-seg');
@@ -717,6 +732,8 @@
       areas: result.areas || [],
       styles: result.styles || [],
       publish: result.publish || null,
+      payment: result.payment || null,
+      rights: result.rights || null,
       statusText: (result.status || ''),
       total: result.total || 0
     };
@@ -987,6 +1004,8 @@
       areas: data.areas || [],
       styles: data.styles || [],
       publish: data.publish || null,
+      payment: data.payment || null,
+      rights: data.rights || null,
       statusText: data.statusText || '',
       totalCount: data.total || 0,
       duration: (episodes[0] && episodes[0].duration) || 0,
@@ -1239,6 +1258,20 @@
     if (!el) return;
     el.className = 'pgc-note' + (kind ? ' ' + kind : '');
     el.textContent = text || '';
+    updatePgcSize();
+  }
+  function updatePgcSize() {
+    var el = $('pgc-size');
+    if (!el) return;
+    if (!current || current.kind !== 'bangumi') { el.hidden = true; el.textContent = ''; return; }
+    var segBtn = typeSeg && typeSeg.querySelector('.seg-btn.active');
+    var type = segBtn ? segBtn.dataset.type : 'video';
+    var qn = Number(pgcQn && pgcQn.value) || 80;
+    var ak = (pgcAudio && pgcAudio.value === 'std') ? 132 : 192;
+    var size = estimateSizeText(pgcSelectedDuration(), qn, type, ak);
+    if (!size) { el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.textContent = '预估' + (type === 'audio' ? '音频' : '视频') + '大小：' + size;
   }
   function fillPgcQuality() {
     if (!pgcQn) return;
@@ -1309,6 +1342,14 @@
     }
     if (notes.length) setPgcNote('warn', notes.join('；'));
     else setPgcNote('ok', pgcQualityHint());
+  }
+  function pgcSelectedDuration() {
+    if (!current) return 0;
+    var idx = Number((pgcActiveKey || 'full:0').split(':')[1]);
+    var ep = current.episodes && current.episodes[idx];
+    if (ep && ep.duration) return Number(ep.duration);
+    if (current.isExtra && current.extras && current.extras[idx] && current.extras[idx].duration) return Number(current.extras[idx].duration);
+    return Number(current.duration) || 0;
   }
   function pgcQualityHint() {
     var qn = Number(pgcQn && pgcQn.value);
@@ -2340,6 +2381,31 @@
   }
 
   /* 番剧 / 影视剧集：必须走 pgc/player/web/playurl，普通 x/player/playurl 拿不到正片高清流 */
+  /* 从任务快照里按 epId 找当前集，避免全局 pgcActiveKey 与后台任务错位 */
+  function pgcEpisodeForMedia(media) {
+    if (!media) return null;
+    var groups = [media.episodes || [], media.extras || []];
+    for (var g = 0; g < groups.length; g++) {
+      for (var i = 0; i < groups[g].length; i++) {
+        var ep = groups[g][i];
+        if (media.epId && String(ep.ep_id || ep.id) === String(media.epId)) return ep;
+        if (!media.epId && g === 0 && i === (media.pageIndex || 0)) return ep;
+      }
+    }
+    return null;
+  }
+  function pgcAccessHint(media) {
+    var ep = pgcEpisodeForMedia(media);
+    var badge = String((ep && ep.badge) || '');
+    var paid = /付费|购买|租用/.test(badge);
+    var vip = /大会员|会员/.test(badge);
+    var payment = (media && media.payment) || {};
+    var price = Number(payment.price);
+    if (!paid && !vip && (price > 0 || Number(payment.pay_type) === 2)) paid = true;
+    if (paid) return '该影片为付费影片，请先购买 / 租用后再下载';
+    if (vip) return '该影片需要大会员权限，请登录有权限的账号后重试';
+    return '当前账号权限不足（可能需要购买或大会员），请登录有权限的账号后重试';
+  }
   function fetchPgcPlayurl(media, fnval, qn) {
     var referer = pageReferer(media);
     var params = { ep_id: media.epId, cid: media.cid, qn: qn, fnval: fnval, fourk: 1 };
@@ -2355,15 +2421,15 @@
         return r;
       });
     }).then(function (result) {
-      if (!result || (!result.durl && !result.dash)) throw new Error('该剧集暂无可下载地址（可能需要 VIP / 大会员权限）');
-      // 大会员影视（尤其电影）在无权限账号下只返回试看片段：is_preview=1。
+      if (!result || (!result.durl && !result.dash)) throw new Error('该剧集暂无可下载地址：' + pgcAccessHint(media));
+      // 大会员 / 付费影视在无权限账号下只返回试看片段：is_preview=1。
       // 直接拒绝，避免把 6 分钟试看当完整影片保存下来还显示「完成」。
       if (result.is_preview === 1) {
         var previewSec = 0;
         if (result.durl && result.durl.length && result.durl[0].length) previewSec = Number(result.durl[0].length) / 1000;
         else if (result.dash && result.dash.duration) previewSec = Number(result.dash.duration);
         var prevErr = new Error('当前账号只能观看试看片段' + (previewSec ? '（约 ' + fmtDur(Math.round(previewSec)) + '）' : '') +
-          '，未保存文件。该影片需要大会员权限，请登录有权限的账号后重试');
+          '，未保存文件。' + pgcAccessHint(media));
         prevErr.preview = true;
         throw prevErr;
       }
@@ -3160,6 +3226,17 @@
     if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
     return n + ' B';
   }
+  // 按清晰度标称码率 + 音轨码率估算体积（仅用于下载前提示，实际以文件为准）
+  var EST_VIDEO_KBPS = { 125: 6500, 120: 6000, 116: 4800, 112: 4200, 80: 3000, 74: 2200, 64: 1800, 32: 950, 16: 520 };
+  function estimateSizeText(durationSec, qn, type, audioKbps) {
+    var sec = Number(durationSec) || 0;
+    if (sec <= 0) return '';
+    var vk = EST_VIDEO_KBPS[Number(qn)] || 3000;
+    var ak = Number(audioKbps) || 192;
+    var kbps = type === 'audio' ? ak : vk + ak;
+    var bytes = Math.round(sec * kbps * 1000 / 8);
+    return '约 ' + fmtSize(bytes) + '（' + fmtDur(sec) + ' · ' + kbps + ' kbps）';
+  }
   function escHtml(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
@@ -3327,7 +3404,9 @@
       }
     });
   }
+  var suppressQueuePump = false;
   function pumpQueue() {
+    if (suppressQueuePump) return;
     while (runningCount < maxConcurrent && taskQueue.length) {
       var t = taskQueue.shift();
       if (t.cancelled) continue;   // 已被取消的任务不占槽位
@@ -3348,24 +3427,43 @@
   /** 取消即删除进程：停止下载、移除任务卡、清除续传状态（不保留「继续下载」） */
   function removeTaskProcess(t) {
     if (!t) return;
+    t.cancelled = true;
     if (t.timer) clearTimeout(t.timer);
     if (t._retryTimer) clearTimeout(t._retryTimer);
-    t.cancelled = true;
     if (t.cancelFn) { try { t.cancelFn(); } catch (e) { } }
     clearResumeState(t);
+    // 排队中的任务也必须出队；运行中的任务释放并发槽位，否则取消后会继续拉起下一条
+    var qi = taskQueue.indexOf(t);
+    if (qi >= 0) taskQueue.splice(qi, 1);
+    if (t._running) {
+      t._running = false;
+      if (runningCount > 0) runningCount--;
+    }
     if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
     var i = tasks.indexOf(t);
     if (i >= 0) tasks.splice(i, 1);
     renderQueue();
+    pumpQueue();
   }
   function cancelAllTasks() {
     var count = 0;
     var alive0 = tasks.slice();
-    alive0.forEach(function (t) {
-      if (['done', 'error', 'cancelled'].indexOf(t.status) >= 0) return;
-      count++;
-      removeTaskProcess(t);
-    });
+    // 先冻结调度器：取消运行中的任务会异步触发 onTaskFinished，若此时 pumpQueue 仍可执行，
+    // 就会在「取消全部」的循环处理到排队任务之前把它们拉起来。
+    suppressQueuePump = true;
+    try {
+      alive0.forEach(function (t) {
+        if (['done', 'error', 'cancelled'].indexOf(t.status) >= 0) return;
+        count++;
+        removeTaskProcess(t);
+      });
+      // 兜底清空队列，防止个别任务未挂在 tasks 上却被调度器继续消费
+      taskQueue.length = 0;
+      runningCount = 0;
+    } finally {
+      suppressQueuePump = false;
+    }
+    refreshQueueOrder();
     var alive = tasks.filter(function (t) { return ['done', 'error', 'cancelled'].indexOf(t.status) < 0; });
     if (tasksCancelAll) tasksCancelAll.hidden = alive.length === 0;
     if (batchCancelAll) batchCancelAll.hidden = alive.length === 0;
@@ -4682,6 +4780,7 @@
     optAudio.hidden = type !== 'audio';
     optAq.hidden = !(type === 'audio' && afSelect.value === 'mp3');
     ['opt-format', 'opt-clip', 'opt-extra'].forEach(function (id) { var element = $(id); if (element) element.hidden = type !== 'video' || IS_ANDROID; });
+    updatePgcSize();
   });
   afSelect.addEventListener('change', function () {
     optAq.hidden = afSelect.value !== 'mp3';
@@ -5136,8 +5235,8 @@
     var isSeason = current.kind === 'bangumi';
     var list = isSeason ? (current.episodes || []) : (current.pages || []);
     if (!list.length) { showToast('无可批量下载的 P / 集', 'warn'); return; }
-    batchData = { list: list, isSeason: isSeason };
-    var sub = (isSeason ? '番剧 ' : '分P / 收藏夹 ') + list.length + ' 个任务，将按并发上限同时下载（当前最多 ' + maxConcurrent + ' 项），其余自动排队。批量下载不支持片段裁剪与附带弹幕/字幕。';
+    batchData = { list: list, isSeason: isSeason, selected: list.map(function () { return true; }) };
+    var sub = (isSeason ? '番剧 ' : '分P / 收藏夹 ') + list.length + ' 个任务，将按并发上限同时下载（当前最多 ' + maxConcurrent + ' 项），其余自动排队。点击条目可勾选 / 取消，默认全选。批量下载不支持片段裁剪与附带弹幕/字幕。';
     if (batchSub) batchSub.textContent = sub;
     // 同步当前全局清晰度/线程等选项到批量面板
     if (batchQn) {
@@ -5169,10 +5268,11 @@
       if (batchFmt) batchFmt.value = 'mp4';
       if (batchThread) batchThread.value = '8';
     }
-    // 渲染任务列表（当前全部待下载）
+    // 渲染任务列表（当前全部选中、待下载）
     renderBatchList(list.map(function () { return { status: 'queued' }; }));
     batchStarted = false;
-    if (batchStart) { batchStart.disabled = false; batchStart.textContent = '开始批量下载'; }
+    if (batchStart) batchStart.disabled = false;
+    updateBatchStartLabel();
     batchPanel.hidden = false;
     if (mainContainer) mainContainer.hidden = true;
     document.body.classList.add('overlay-active');
@@ -5189,35 +5289,83 @@
     }
     if (mainContainer) mainContainer.hidden = false;
   }
+  function batchSelectedCount() {
+    if (!batchData || !batchData.list) return 0;
+    return batchData.list.reduce(function (n, _, i) {
+      return n + (batchData.selected && batchData.selected[i] ? 1 : 0);
+    }, 0);
+  }
+  function updateBatchStartLabel() {
+    if (batchStart) {
+      if (batchStarted) {
+        batchStart.textContent = batchActive ? '批量下载中…' : '批量任务已结束';
+        batchStart.disabled = true;
+      } else {
+        var count = batchSelectedCount();
+        batchStart.textContent = '下载选中 (' + count + ')';
+        batchStart.disabled = count === 0;
+      }
+    }
+    if (batchDownloadAll) batchDownloadAll.disabled = batchStarted || batchActive;
+  }
   function renderBatchList(states) {
-    if (!batchList) return;
+    if (!batchList || !batchData) return;
     batchList.innerHTML = '';
     var list = batchData.list;
+    var selected = batchData.selected || [];
     for (var i = 0; i < list.length; i++) {
       var p = list[i];
       var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
+      var isSelected = !!selected[i];
       var row = document.createElement('div');
-      row.className = 'batch-item';
+      row.className = 'batch-item' + (isSelected ? ' selected' : '') + ((states[i] && states[i].status === 'running') ? ' running' : '');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'batch-check';
+      cb.checked = isSelected;
+      cb.disabled = batchStarted;
+      cb.title = isSelected ? '取消选择该集' : '选择该集';
+      cb.setAttribute('aria-label', cb.title);
+      cb.addEventListener('click', function (ev) { ev.stopPropagation(); });
+      cb.addEventListener('change', (function (idx) {
+        return function () {
+          if (batchStarted) return;
+          batchData.selected[idx] = this.checked;
+          renderBatchList(states);
+        };
+      })(i));
       var name = document.createElement('div');
       name.className = 'batch-item-name';
       name.textContent = label;
       name.title = label;
       var st = document.createElement('div');
-      st.className = 'batch-item-state ' + (states[i] ? states[i].status : 'queued');
-      var map = { queued: '等待中', running: '下载中…', done: '✅ 完成', error: '❌ 失败', cancelled: '已取消' };
-      var key = (states[i] && states[i].status) || 'queued';
+      var key = isSelected ? ((states[i] && states[i].status) || 'queued') : 'skipped';
+      st.className = 'batch-item-state ' + key;
+      var map = { queued: '等待中', running: '下载中…', done: '✅ 完成', error: '❌ 失败', cancelled: '已取消', skipped: '未选择' };
       st.textContent = map[key] || key;
       st.title = (states[i] && states[i].note) || '';
-      if (states[i] && states[i].note && key === 'error') {
-        var nt = document.createElement('div');
-        nt.className = 'batch-item-note';
-        nt.textContent = states[i].note;
-        row.appendChild(nt);
-      }
+      var noteText = (states[i] && states[i].note && key === 'error') ? states[i].note : '';
+      row.appendChild(cb);
       row.appendChild(name);
       row.appendChild(st);
+      if (noteText) {
+        var nt = document.createElement('div');
+        nt.className = 'batch-item-note';
+        nt.textContent = noteText;
+        row.appendChild(nt);
+      }
+      if (!batchStarted) {
+        row.addEventListener('click', (function (idx) {
+          return function (ev) {
+            if (ev.target && ev.target.classList && ev.target.classList.contains('batch-check')) return;
+            batchData.selected[idx] = !batchData.selected[idx];
+            renderBatchList(states);
+          };
+        })(i));
+      }
       batchList.appendChild(row);
     }
+    updateBatchStartLabel();
   }
   // 批量开始：为每集生成独立 source 快照，全部并发入队，由全局调度器控制并发上限
   function startBatch() {
@@ -5242,9 +5390,19 @@
 
     batchActive = true;
     batchStarted = true;
-    if (batchStart) batchStart.disabled = true;
     var list = batchData.list;
-    var n = list.length;
+    var picked = [];
+    for (var pi = 0; pi < list.length; pi++) {
+      if (!batchData.selected || batchData.selected[pi]) picked.push(pi);
+    }
+    if (!picked.length) {
+      batchActive = false;
+      batchStarted = false;
+      updateBatchStartLabel();
+      showToast('请至少勾选一集再开始下载', 'warn');
+      return;
+    }
+    var n = picked.length;
     var baseSource = JSON.parse(JSON.stringify(current));
     var pref = {
       qn: Number(batchQn && batchQn.value) || Number(qnSelect.value) || 80,
@@ -5258,7 +5416,9 @@
       subtitle: false,
       audioPref: (batchData.isSeason && $('pgc-audio')) ? $('pgc-audio').value : 'high'
     };
-    var states = list.map(function () { return { status: 'queued' }; });
+    var states = list.map(function (_, idx) {
+      return { status: (batchData.selected && batchData.selected[idx]) ? 'queued' : 'skipped' };
+    });
     var finished = 0;
     renderBatchList(states);
 
@@ -5266,7 +5426,7 @@
       finished++;
       if (finished < n) return;
       batchActive = false;
-      if (batchStart) { batchStart.disabled = false; batchStart.textContent = '全部完成，可返回重新下载'; }
+      updateBatchStartLabel();
       showToast('✅ 批量下载已全部结束（' + n + ' 个任务）', 'ok');
     };
 
@@ -5343,12 +5503,18 @@
     };
 
     showToast('⏳ 已加入 ' + n + ' 个下载任务（同时最多 ' + maxConcurrent + ' 项，其余自动排队）', 'ok');
-    for (var i = 0; i < n; i++) enqueueItem(list[i], i);
+    for (var k = 0; k < picked.length; k++) enqueueItem(list[picked[k]], picked[k]);
   }
   if (btnAll) {
     btnAll.addEventListener('click', openBatchPanel);
   }
   if (batchStart) batchStart.addEventListener('click', startBatch);
+  if (batchDownloadAll) batchDownloadAll.addEventListener('click', function () {
+    if (!batchData || batchStarted || batchActive) return;
+    batchData.selected = batchData.list.map(function () { return true; });
+    renderBatchList(batchData.list.map(function () { return { status: 'queued' }; }));
+    startBatch();
+  });
   if (batchBack) batchBack.addEventListener('click', function () {
     if (batchActive) { showToast('批量下载仍在进行，返回后任务会继续在下载任务列表显示', 'warn'); }
     closeBatchPanel();
@@ -5683,7 +5849,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.9';
+  var APP_VERSION = '1.8.10';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -6093,6 +6259,12 @@
     var stat = it.stat || {};
     var owner = it.owner || {};
     var bvid = it.bvid || (it.aid ? 'av' + it.aid : '');
+    // rcmd_reason 可能返回对象（content/ text），直接拼接会显示 [object Object]
+    var reasonRaw = it.rcmd_reason;
+    var reason = '';
+    if (typeof reasonRaw === 'string') reason = reasonRaw;
+    else if (reasonRaw && typeof reasonRaw === 'object') reason = reasonRaw.content || reasonRaw.text || '';
+    if (typeof reason !== 'string') reason = '';
     return {
       bvid: bvid,
       title: cleanSearchTitle(it.title || '未命名视频'),
@@ -6102,7 +6274,7 @@
       danmaku: Number(stat.danmaku) || 0,
       duration: it.duration || 0,
       rank: index + 1,
-      reason: cleanSearchTitle(it.rcmd_reason && (it.rcmd_reason.content || it.rcmd_reason) || '')
+      reason: cleanSearchTitle(reason)
     };
   }
   function renderHotCards(items) {
@@ -6113,7 +6285,7 @@
       var card = document.createElement('button');
       card.type = 'button';
       card.className = 'hot-card';
-      card.setAttribute('aria-label', '打开《' + item.title + '》解析下载');
+      card.setAttribute('aria-label', '在热门页播放《' + item.title + '》');
       var rankCls = item.rank <= 3 ? 'hot-rank top' : 'hot-rank';
       card.innerHTML =
         '<div class="hot-cover">' +
@@ -6130,16 +6302,183 @@
           '</div>' +
           '<div class="hot-stats"><span>弹幕 ' + escHtml(fmtCount(item.danmaku)) + '</span>' +
             (item.reason ? '<span>· ' + escHtml(item.reason) + '</span>' : '') + '</div>' +
-          '<span class="hot-cta">解析并下载 →</span>' +
+          '<span class="hot-cta">立即播放 →</span>' +
         '</div>';
       var img = card.querySelector('img');
       if (img) img.addEventListener('error', function () { img.style.display = 'none'; });
-      card.addEventListener('click', function () { openHotVideo(item); });
+      card.addEventListener('click', function () { selectHotVideo(item); });
       hotGrid.appendChild(card);
+    });
+  }
+  /* ---------- 热门推荐：点击卡片直接播放，播放栏下方直接下载 ---------- */
+  function videoCurrentFromData(data) {
+    return {
+      kind: 'video',
+      bvid: data.bvid,
+      aid: data.aid,
+      cid: data.cid,
+      title: data.title,
+      pic: fixCover(data.pic),
+      up: data.owner ? data.owner.name : '',
+      duration: data.duration || 0,
+      stat: data.stat || {},
+      pubdate: data.pubdate || 0,
+      pages: (data.pages && data.pages.length) ? data.pages : [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }],
+      pageIndex: 0,
+      degraded: !!data.degraded,
+      upower: !!(data.is_upower_exclusive || (data.argue_info && data.argue_info.text))
+    };
+  }
+  function applyHotTypeUi() {
+    if (!hotTypeSeg) return;
+    var type = (hotTypeSeg.querySelector('.seg-btn.active') || { dataset: { type: 'video' } }).dataset.type;
+    if (hotQn) { hotQn.disabled = type === 'audio'; }
+    if (hotFmt) { hotFmt.disabled = type === 'audio'; }
+    updateHotSize();
+  }
+  function hotDuration() {
+    var cur = hotWatchState.current || {};
+    var page = cur.pages && cur.pages[cur.pageIndex || 0];
+    return Number(cur.duration) || Number(page && page.duration) || (hotWatchState.item && hotWatchState.item.duration) || 0;
+  }
+  function updateHotSize() {
+    if (!hotDlSize) return;
+    if (!hotWatchState.current && !hotWatchState.item) { hotDlSize.textContent = '选择视频后显示预估大小'; return; }
+    var type = (hotTypeSeg && (hotTypeSeg.querySelector('.seg-btn.active') || {}).dataset.type) || 'video';
+    var qn = Number(hotQn && hotQn.value) || 80;
+    var text = estimateSizeText(hotDuration(), qn, type, 192);
+    hotDlSize.textContent = text ? (type === 'audio' ? '预估音频大小：' + text : '预估视频大小：' + text) : '时长未知，下载后可查看实际大小';
+  }
+  function setHotLoading(text) {
+    if (!hotWatchLoading) return;
+    if (!text) { hotWatchLoading.hidden = true; return; }
+    hotWatchLoading.hidden = false;
+    hotWatchLoading.textContent = text;
+  }
+  function selectHotVideo(item) {
+    if (!item || !item.bvid || !hotWatch || !hotVideo) return;
+    var requestId = ++hotWatchState.requestId;
+    hotWatchState.item = item;
+    hotWatchState.current = null;
+    hotWatch.hidden = false;
+    if (hotWatchTitle) hotWatchTitle.textContent = item.title || '正在加载视频…';
+    if (hotWatchMeta) hotWatchMeta.textContent = (item.owner ? 'UP · ' + item.owner + ' · ' : '') + (item.duration ? fmtDur(item.duration) : '');
+    hotVideo.pause();
+    hotVideo.removeAttribute('src');
+    hotVideo.load();
+    setHotLoading('正在获取视频信息…');
+    if (!hotQn.options.length && qnSelect) {
+      Array.prototype.forEach.call(qnSelect.options, function (o) { hotQn.appendChild(o.cloneNode(true)); });
+      hotQn.value = qnSelect.value || '80';
+    }
+    updateHotSize();
+    hotWatch.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    viewByVideo({ bvid: item.bvid, aid: item.aid }).then(function (data) {
+      if (requestId !== hotWatchState.requestId) return;
+      if (!data || !data.bvid) throw new Error('未获取到视频信息');
+      hotWatchState.current = videoCurrentFromData(data);
+      if (hotWatchMeta) {
+        var st = hotWatchState.current.stat || {};
+        var bits = [hotWatchState.current.up ? 'UP · ' + hotWatchState.current.up : '', fmtDur(hotWatchState.current.duration || 0)];
+        if (st.view) bits.push('▶ ' + fmtCount(st.view));
+        if (st.danmaku) bits.push('弹幕 ' + fmtCount(st.danmaku));
+        hotWatchMeta.textContent = bits.filter(Boolean).join(' · ');
+      }
+      updateHotSize();
+      playHotVideo(requestId);
+    }).catch(function (err) {
+      if (requestId !== hotWatchState.requestId) return;
+      setHotLoading('视频信息加载失败：' + (err && err.message ? err.message : '网络错误'));
+    });
+  }
+  function playHotVideo(requestId) {
+    var cur = hotWatchState.current;
+    if (!cur || !hotVideo) return;
+    var qn = Number(hotQn && hotQn.value) || 80;
+    setHotLoading('正在获取播放地址…');
+    var open = function (url) {
+      if (!url) throw new Error('没有拿到播放地址');
+      getProxyAuth().then(function (auth) {
+        var tok = auth && auth.token ? auth.token : '';
+        var viaProxy = proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
+        var triedDirect = false;
+        hotVideo.onerror = function () {
+          if (triedDirect) { setHotLoading('播放失败，可切换清晰度或使用完整下载选项'); return; }
+          triedDirect = true;
+          hotVideo.onerror = null;
+          hotVideo.src = url;
+          hotVideo.play().catch(function () { setHotLoading('点击播放器开始播放'); });
+        };
+        hotVideo.src = viaProxy;
+        hotVideo.play().catch(function () {
+          // 自动播放被拦截时保留原生 controls，让用户手动点击播放
+          setHotLoading('点击播放器开始播放');
+        });
+      });
+    };
+    var tryMp4 = function (q) {
+      return fetchPlayurl(1, q, cur).then(function (data) {
+        if (!data || !data.durl || !data.durl.length) throw new Error('该视频暂无可播放地址');
+        var url = data.durl[0].url;
+        if (requestId != null && requestId !== hotWatchState.requestId) return;
+        open(url);
+      });
+    };
+    tryMp4(qn).catch(function () { return tryMp4(64); }).catch(function () { return tryMp4(32); })
+      .catch(function (e) { setHotLoading('播放失败：' + (e && e.message ? e.message : '网络错误') + '，可切换清晰度或使用完整下载选项'); });
+  }
+  function startHotDownload() {
+    var cur = hotWatchState.current;
+    if (!cur) { showToast('请先选择一个视频并等待信息加载完成', 'warn'); return; }
+    var type = (hotTypeSeg.querySelector('.seg-btn.active') || { dataset: { type: 'video' } }).dataset.type || 'video';
+    var page = cur.pages && cur.pages[cur.pageIndex || 0];
+    var base = safeName(cur.title) + (cur.pages && cur.pages.length > 1 && page ? ' [P' + page.page + ']' : '');
+    var t = createTask(base + (type === 'audio' ? '（音频）' : '（视频）'), type === 'audio' ? '音频' : '视频', cur);
+    t.type = type;
+    t.settings = {
+      qn: Number(hotQn && hotQn.value) || 80,
+      threads: Number(hotThread && hotThread.value) || 8,
+      enc: 'auto',
+      format: (hotFmt && hotFmt.value) || 'mp4',
+      clip: '',
+      af: 'm4a',
+      aq: Number(aqSelect && aqSelect.value) || 192,
+      danmaku: false,
+      subtitle: false,
+      audioPref: 'high'
+    };
+    queueTask(t, function () {
+      if (type === 'video') downloadVideo(t); else downloadAudio(t);
+    });
+    showToast('⏳ 已加入下载队列：' + cur.title, 'ok');
+  }
+  if (hotWatchClose) hotWatchClose.addEventListener('click', function () {
+    if (hotVideo) { hotVideo.pause(); hotVideo.removeAttribute('src'); hotVideo.load(); }
+    if (hotWatch) hotWatch.hidden = true;
+  });
+  if (hotTypeSeg) hotTypeSeg.addEventListener('click', function (ev) {
+    var btn = ev.target.closest ? ev.target.closest('.seg-btn') : null;
+    if (!btn) return;
+    hotTypeSeg.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.toggle('active', b === btn); });
+    applyHotTypeUi();
+  });
+  if (hotQn) hotQn.addEventListener('change', function () {
+    updateHotSize();
+    if (hotWatchState.current) playHotVideo(hotWatchState.requestId);
+  });
+  if (hotDownloadBtn) hotDownloadBtn.addEventListener('click', startHotDownload);
+  if (hotOpenDetail) hotOpenDetail.addEventListener('click', function () {
+    if (hotWatchState.item) openHotVideo(hotWatchState.item);
+  });
+  if (hotVideo) {
+    hotVideo.addEventListener('playing', function () { setHotLoading(''); });
+    hotVideo.addEventListener('waiting', function () {
+      if (hotVideo.src) setHotLoading('缓冲中…');
     });
   }
   function openHotVideo(item) {
     if (!item || !item.bvid) return;
+    if (hotVideo) { try { hotVideo.pause(); } catch (e) { } }
     if (contentMode !== 'video') applyContentMode('video', { focus: true });
     if (inputEl) inputEl.value = item.bvid.indexOf('av') === 0 ? item.bvid : ('https://www.bilibili.com/video/' + item.bvid);
     if (typeof startParse === 'function') startParse(item.bvid);
@@ -6403,11 +6742,14 @@
 
   // ---- UI 模式切换：已移入设置页（精简版 / 完全版） ----
   var uiModeSelect = $('ui-mode-select');
-  var liteEls = document.querySelectorAll('.lite-hide');
   function applyUiMode(mode) {
     var lite = mode === 'lite';
     if (uiModeSelect) uiModeSelect.value = lite ? 'lite' : 'full';
-    for (var j = 0; j < liteEls.length; j++) liteEls[j].hidden = lite;
+    // 只切换 body 级开关，不再逐个改 .hidden：
+    // 这样切频道 / 切音频时其他逻辑写 hidden 也不会把精简版覆盖掉；
+    // 切回完全版时也不会误把「音频模式该隐藏」的编码 / 封装选项放出来。
+    document.body.classList.toggle('ui-lite', lite);
+    document.body.setAttribute('data-ui-mode', lite ? 'lite' : 'full');
     try { localStorage.setItem('biliUiMode', mode); } catch (e) { }
   }
   if (uiModeSelect) {
