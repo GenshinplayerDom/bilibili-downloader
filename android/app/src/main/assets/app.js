@@ -182,6 +182,9 @@
   var batchThread = $('batch-thread');
   var batchFmt = $('batch-fmt');
   var batchActive = false;
+  var batchRunToken = 0;
+  var batchStates = null;
+  var batchWasCanceled = false;
   var batchData = null;
   var batchStarted = false;
   // 番剧 / 电影独立下载页
@@ -1346,9 +1349,13 @@
   function pgcSelectedDuration() {
     if (!current) return 0;
     var idx = Number((pgcActiveKey || 'full:0').split(':')[1]);
+    // 预告 / 花絮索引与正片 episodes 的索引不是同一套，优先按当前分组取时长
+    if (current.isExtra) {
+      var ex = current.extras && current.extras[idx];
+      if (ex && ex.duration) return Number(ex.duration);
+    }
     var ep = current.episodes && current.episodes[idx];
     if (ep && ep.duration) return Number(ep.duration);
-    if (current.isExtra && current.extras && current.extras[idx] && current.extras[idx].duration) return Number(current.extras[idx].duration);
     return Number(current.duration) || 0;
   }
   function pgcQualityHint() {
@@ -3447,6 +3454,19 @@
   }
   function cancelAllTasks() {
     var count = 0;
+    // 批量任务可能还在「获取视频信息」阶段（尚未生成 task）。递增 token 让这些
+    // 迟到的 Promise 直接作废，避免取消全部后又冒出新的下载任务。
+    if (batchActive) {
+      batchRunToken++;
+      batchActive = false;
+      batchStarted = true;
+      batchWasCanceled = true;
+      if (batchStates) {
+        batchStates.forEach(function (state) { if (state.status === 'queued' || state.status === 'running') state.status = 'cancelled'; });
+        renderBatchList(batchStates);
+        updateBatchStartLabel();
+      }
+    }
     var alive0 = tasks.slice();
     // 先冻结调度器：取消运行中的任务会异步触发 onTaskFinished，若此时 pumpQueue 仍可执行，
     // 就会在「取消全部」的循环处理到排队任务之前把它们拉起来。
@@ -5419,6 +5439,9 @@
     var states = list.map(function (_, idx) {
       return { status: (batchData.selected && batchData.selected[idx]) ? 'queued' : 'skipped' };
     });
+    var runId = ++batchRunToken;
+    batchStates = states;
+    batchWasCanceled = false;
     var finished = 0;
     renderBatchList(states);
 
@@ -5427,7 +5450,7 @@
       if (finished < n) return;
       batchActive = false;
       updateBatchStartLabel();
-      showToast('✅ 批量下载已全部结束（' + n + ' 个任务）', 'ok');
+      if (!batchWasCanceled) showToast('✅ 批量下载已全部结束（' + n + ' 个任务）', 'ok');
     };
 
     // 监听单个任务状态；任务取消后会被移出 tasks 列表，因此同时检查 cancelled 标记
@@ -5481,24 +5504,33 @@
     };
 
     var enqueueItem = function (p, rowIdx) {
+      var stale = function () { return runId !== batchRunToken; };
+      var cancelledBeforeStart = function () {
+        states[rowIdx] = { status: 'cancelled' };
+        renderBatchList(states);
+        finishOne();
+      };
       var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
       // 合集 API 不返回 cid：先补全（含标题/时长）再开始下载，避免任务启动即失败
       if (!p.cid && p.bvid) {
         states[rowIdx] = { status: 'queued', note: '正在获取视频信息…' };
         renderBatchList(states);
         viewByVideo({ bvid: p.bvid, aid: p.aid }).then(function (d) {
+          if (stale()) { cancelledBeforeStart(); return; }
           if (!d || !d.cid) throw new Error('未获取到该视频信息');
           p.cid = d.cid;
           if (d.aid) p.aid = d.aid;
           if (!batchData.isSeason) label = 'P' + p.page + ' · ' + (d.title || p.part || '');
           startItem(p, rowIdx, label);
         }).catch(function (e) {
+          if (stale()) { cancelledBeforeStart(); return; }
           states[rowIdx] = { status: 'error', note: (e && e.message ? e.message : '获取视频信息失败') };
           renderBatchList(states);
           finishOne();
         });
         return;
       }
+      if (stale()) { cancelledBeforeStart(); return; }
       startItem(p, rowIdx, label);
     };
 
@@ -5849,7 +5881,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.10';
+  var APP_VERSION = '1.8.11';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -6399,6 +6431,8 @@
     var open = function (url) {
       if (!url) throw new Error('没有拿到播放地址');
       getProxyAuth().then(function (auth) {
+        // 等鉴权期间用户可能已切清晰度 / 换视频，旧请求禁止再覆盖播放器
+        if (requestId != null && requestId !== hotWatchState.requestId) return;
         var tok = auth && auth.token ? auth.token : '';
         var viaProxy = proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
         var triedDirect = false;
@@ -6464,7 +6498,11 @@
   });
   if (hotQn) hotQn.addEventListener('change', function () {
     updateHotSize();
-    if (hotWatchState.current) playHotVideo(hotWatchState.requestId);
+    if (hotWatchState.current) {
+      // 换清晰度视为新请求，让旧的地址请求失效
+      var rid = ++hotWatchState.requestId;
+      playHotVideo(rid);
+    }
   });
   if (hotDownloadBtn) hotDownloadBtn.addEventListener('click', startHotDownload);
   if (hotOpenDetail) hotOpenDetail.addEventListener('click', function () {
@@ -6551,6 +6589,8 @@
 
   function applyContentMode(mode, opts) {
     if (mode !== 'hot' && mode !== 'bangumi' && mode !== 'movie' && mode !== 'video') mode = 'video';
+    // 离开热门页时必须暂停内嵌播放器，否则切到视频 / 番剧频道后音频仍在后台播放
+    if (mode !== 'hot' && hotVideo) { try { hotVideo.pause(); } catch (e) { } }
     // 手机端保持原有视频界面，桌面端才开放热门 / 番剧 / 电影频道
     if ((IS_ANDROID || (window.innerWidth && window.innerWidth <= 520)) && (!opts || !opts.force)) mode = 'video';
     var previous = contentMode;

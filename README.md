@@ -1,6 +1,6 @@
 # 哔哩下载器 · GenshinplayerDom
 
-B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.10**（线上最新发布 v1.8.10；上一版 v1.8.9 也已发布）。作者 GenshinplayerDom，MIT License。
+B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.11**（线上最新发布 v1.8.11；上一版 v1.8.10 也已发布）。作者 GenshinplayerDom，MIT License。
 
 > 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 
@@ -23,14 +23,14 @@ B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 W
 
 ## 下载与安装
 
-最新版本：**[v1.8.10](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.10)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
+最新版本：**[v1.8.11](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.11)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
 
 | 文件 | 适用场景 | 大小 |
 | --- | --- | --- |
-| [BiliDownloader-1.8.10-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.10/BiliDownloader-1.8.10-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
-| [BiliDownloader-1.8.10-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.10/BiliDownloader-1.8.10-x64-portable.zip) | 64 位免安装便携版 | 179MB |
+| [BiliDownloader-1.8.11-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.11/BiliDownloader-1.8.11-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
+| [BiliDownloader-1.8.11-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.11/BiliDownloader-1.8.11-x64-portable.zip) | 64 位免安装便携版 | 179MB |
 
-> 本轮发布 64 位版本；32 位版本未随 1.8.10 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
+> 本轮发布 64 位版本；32 位版本未随 1.8.11 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
 > 安装版与便携版都内置 FFmpeg，无需额外安装；便携版解压即用，配置与下载记录仍写在用户目录。
 
 ## 现有功能
@@ -132,6 +132,7 @@ Linux / macOS 使用 `bash ./gradlew :app:assembleDebug`。Wrapper 使用 Gradle
 
 ## 版本历史
 
+- **v1.8.11**：热门内嵌播放器切到视频 / 番剧 / 电影频道时自动暂停，不再后台残留音频；切换清晰度会作废旧播放地址请求；批量下载在「获取视频信息」阶段取消全部后，迟到请求不再拉起新任务，并避免误报批量完成；预告 / 花絮预估体积改按 extras 索引取时长，不再串到正片时长。
 - **v1.8.10**：批量下载支持逐集勾选 / 全选与「下载全部」；修复「中断 / 取消全部」后排队任务仍被调度器拉起；热门推荐改为点击即播，播放器下方直接提供下载选项与预估大小，并优化四列网格布局与 `[object Object]` 统计；番剧 / 电影下载设置下方新增视频 / 音频预估体积；修正付费影片被误报「需要大会员」；统一下载选项控件高度；精简版改为 `body.ui-lite` 强制隐藏，修复切频道 / 音视频后被 `hidden` 覆盖失效。
 - **v1.8.9**：番剧「下载全部正片」改为全部剧集一次性并发入队，修复只启动第 1 集、其余 27 集一直等待的问题；每集独立快照，保留各自 ep_id / cid；新增多线程 Range 并发回归测试，确认 8 / 16 线程确实同时发起分片请求；番剧底部操作栏缩窄并为右下角队列球让位，修复「下载本集」被遮挡；下载队列浮层改为毛玻璃虚化。
 - **Android 1.3.3（真机下载修复）**：补齐原生 DASH 双轨下载与 MediaMuxer 合并；playurl 与 CDN 请求改用真实视频页 Referer 并在 412 时退避换身份重试；高清合并失败或无音频轨时自动回退兼容 MP4 直链；空文件 / HTML 错误页不再伪装成视频；文件打开、目录、删除兼容同步桥；MP3 分段保存按任务隔离，禁止 Cookie 注入控制字符。
