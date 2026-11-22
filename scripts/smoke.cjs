@@ -437,6 +437,26 @@ const { execFileSync } = require('node:child_process');
     await page.waitForFunction(() => /第 2 页/.test(document.querySelector('#hot-status').textContent), null, { timeout: 15000 });
     assert.ok(upstreamUrls.filter(u => u.includes('/x/web-interface/popular')).length > hotRequestsBefore, '刷新应重新请求热门接口');
     assert.equal(await page.locator('#hot-refresh').isDisabled(), false, '刷新结束后按钮应恢复可用');
+
+    // 点击热门卡片应直接打开内嵌播放 / 下载栏，并在离开频道 / 关闭时彻底停住视频元素。
+    await hotCard.click();
+    await page.locator('#hot-watch').waitFor({ state: 'visible', timeout: 10000 });
+    assert.ok((await page.locator('#hot-watch-title').textContent()).includes('热门视频 1'), '热门播放栏应显示所选视频标题');
+    assert.equal(await page.locator('#hot-download').isVisible(), true, '热门播放栏应提供下载本视频按钮');
+    assert.ok(await page.locator('#hot-qn option').count() > 0, '热门播放栏应同步清晰度选项');
+    await page.waitForFunction(() => document.querySelector('#hot-dl-size').textContent.includes('预估'), null, { timeout: 10000 });
+    await page.locator('.content-tab[data-content="video"]').click();
+    await page.locator('#hot-page').waitFor({ state: 'hidden', timeout: 10000 });
+    const stopped = await page.evaluate(() => {
+      const v = document.getElementById('hot-video');
+      return { paused: v.paused, src: v.getAttribute('src'), loadingHidden: document.getElementById('hot-watch-loading').hidden };
+    });
+    assert.equal(stopped.paused, true, '离开热门频道后内嵌视频必须暂停');
+    assert.equal(stopped.src, null, '离开热门频道后应清空内嵌视频地址，避免后台残留音频');
+    assert.equal(stopped.loadingHidden, true, '离开热门频道后应清空加载提示');
+    await page.locator('.content-tab[data-content="hot"]').click();
+    await page.locator('#hot-watch-close').click();
+    assert.equal(await page.locator('#hot-watch').isHidden(), true, '关闭按钮应收起热门播放栏');
     // 等顶部刷新提示自动消失，截图只保留页面本身
     await page.waitForTimeout(1600);
     assert.deepEqual(errors, []);

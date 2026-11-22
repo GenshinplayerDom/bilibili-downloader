@@ -167,6 +167,7 @@
   var btnExport = $('btn-export');
   var playerModal = $('player-modal');
   var playerVideo = $('player-video');
+  var onlinePlayerReq = 0;
   // v1.3：批量下载独立界面
   var batchPanel = $('batch-panel');
   var batchList = $('batch-list');
@@ -891,6 +892,11 @@
   /* ---------- 主流程 ---------- */
   function startParse(text) {
     if (busy) return;
+    // 新链接解析：作废上一次在线播放请求，避免旧视频取流晚到后重新弹窗播放
+    onlinePlayerReq++;
+    if (playerVideo) playerVideo.pause();
+    stopAudioStream();
+    if (playerModal) playerModal.hidden = true;
     // 新链接解析：清空上一个视频残留的片段选择与定时
     if (clipInput) clipInput.value = '';
     if (timerInput) timerInput.value = '';
@@ -1353,6 +1359,7 @@
     if (current.isExtra) {
       var ex = current.extras && current.extras[idx];
       if (ex && ex.duration) return Number(ex.duration);
+      return Number(current.duration) || 0;
     }
     var ep = current.episodes && current.episodes[idx];
     if (ep && ep.duration) return Number(ep.duration);
@@ -1857,12 +1864,18 @@
   function playOnlineVideo() {
     if (!current || !current.bvid) { showToast('当前无视频信息', 'warn'); return; }
     if (!playerModal || !playerVideo) { showToast('当前环境不支持在线播放', 'warn'); return; }
+    var req = ++onlinePlayerReq;
+    // 新请求开始即停掉上一条视频 / DASH 音频，避免切换视频时旧声音继续播放
+    playerVideo.pause();
+    stopAudioStream();
     showToast('正在获取在线播放地址（默认 1080P）…', 'ok');
     // 在线播放全走 MP4（durl 合流，含音频轨道，确保有声音）；
     // DASH 为分离流（视频流无音频轨道），仅当全部 MP4 失败时兜底（有画面）。
     // 降级链：1080P MP4 → 720P MP4 → 480P MP4 → 720P DASH（无声）
     var tryDash = function (qn) {
+      if (req !== onlinePlayerReq) return Promise.resolve();
       return fetchPlayurl(4048, qn, current).then(function (data) {
+        if (req !== onlinePlayerReq) return;
         var arr = (data && data.dash && data.dash.video) || [];
         if (!arr.length) throw new Error('该视频暂无 DASH 视频流');
         // 按 B 站实际返回 quality 匹配流（未登录 qn=80 时返回 720P/480P，选返回的最高档），
@@ -1872,15 +1885,17 @@
         var v = candidates.length
           ? candidates.reduce(function (a, b) { return a.id > b.id ? a : b; })
           : arr.reduce(function (a, b) { return a.id < b.id ? a : b; });
-        openOnlinePlayer(v.baseUrl || (v.backupUrl && v.backupUrl[0]), current.title);
+        openOnlinePlayer(v.baseUrl || (v.backupUrl && v.backupUrl[0]), current.title, req);
       });
     };
     var tryMp4 = function (qn) {
       // fnval=1：传统 MP4 合流（必含音频轨），确保在线播放有声音；
       // fnval=16（DASH 标志）对部分视频返回的 durl 可能只有视频轨（无声）
+      if (req !== onlinePlayerReq) return Promise.resolve();
       return fetchPlayurl(1, qn, current).then(function (data) {
+        if (req !== onlinePlayerReq) return;
         if (!data || !data.durl || !data.durl.length) throw new Error('该视频暂无可播放地址');
-        openOnlinePlayer(data.durl[0].url, current.title);
+        openOnlinePlayer(data.durl[0].url, current.title, req);
       });
     };
     // 全 MP4（合流含音频）降级链：1080P → 720P → 480P，确保在线播放有声音；
@@ -1889,6 +1904,7 @@
       return tryMp4(32);
     }).catch(function (e2) {
       return tryDash(64).catch(function () {
+        if (req !== onlinePlayerReq) return;
         showToast('在线播放失败：' + (e2 && e2.message || '网络错误'), 'fail');
       });
     });
@@ -1897,6 +1913,7 @@
   var playerAudio = null;
   function playAudioStream(url) {
     if (!url) return;
+    var req = onlinePlayerReq;
     try {
       if (!playerAudio) {
         playerAudio = new Audio();
@@ -1914,6 +1931,8 @@
         return proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
       };
       getProxyAuth().then(function (auth) {
+        // 鉴权期间可能已关闭播放器 / 切到别的视频，禁止迟到的音频请求重新开声
+        if (req !== onlinePlayerReq) return;
         var tok = auth && auth.token ? auth.token : '';
         playerAudio.muted = playerVideo.muted;
         playerAudio.volume = playerVideo.volume;
@@ -1937,18 +1956,31 @@
   function showPlayerError(msg) {
     if (playerTitle) playerTitle.textContent = msg;
     if (playerVideo) { playerVideo.pause(); playerVideo.removeAttribute('src'); playerVideo.load(); }
+    // DASH 兜底失败时同步停掉分离音频，避免只剩声音在后台播放
+    stopAudioStream();
     showToast(msg, 'fail');
   }
   // 播放失败后的自动降级重试链：MP4(1080P) → DASH(720P) → MP4(720P)，尽力保证可播放
-  function playerFallback(title, depth) {
+  function playerFallback(title, depth, req) {
     depth = depth || 0;
+    if (req != null && req !== onlinePlayerReq) return;
     if (depth > 3) { showPlayerError('播放失败：无法获取可播放的视频流，请检查网络或稍后重试'); return; }
+    stopAudioStream();
     var qn, fnval;
     if (depth === 0) { qn = 80; fnval = 1; }       // 1080P MP4 合流（必含音频轨）
     else if (depth === 1) { qn = 64; fnval = 1; }  // 720P MP4 合流（必含音频轨）
     else if (depth === 2) { qn = 32; fnval = 1; }  // 480P MP4 合流（必含音频轨）
     else { qn = 64; fnval = 4048; }                 // 720P DASH（分离流无声，最后兜底）
     fetchPlayurl(fnval, qn, current).then(function (data) {
+      if (req != null && req !== onlinePlayerReq) return;
+      // 每一级兜底都重新挂 onerror：加载失败时继续降级，而不是停在黑屏
+      var advanced = false;
+      var advance = function () {
+        if (advanced) return;
+        advanced = true;
+        playerFallback(title, depth + 1, req);
+      };
+      playerVideo.onerror = advance;
       if (fnval === 4048) {
         var arr = (data && data.dash && data.dash.video) || [];
         if (!arr.length) throw new Error('无 DASH 流');
@@ -1959,7 +1991,10 @@
         playerVideo.src = v.baseUrl || (v.backupUrl && v.backupUrl[0]);
         // DASH 分离流无声：同步播放音频流（audio 元素），保证在线播放始终有声音
         var aArr = (data && data.dash && data.dash.audio) || [];
-        var au = aArr.length ? (aArr[0].baseUrl || (aArr[0].backupUrl && aArr[0].backupUrl[0])) : '';
+        var bestAudio = aArr.length ? aArr.reduce(function (a, b) {
+          return (Number(b.bandwidth) || 0) > (Number(a.bandwidth) || 0) ? b : a;
+        }) : null;
+        var au = bestAudio ? (bestAudio.baseUrl || (bestAudio.backupUrl && bestAudio.backupUrl[0])) : '';
         if (au) playAudioStream(au); else stopAudioStream();
         if (playerTitle) playerTitle.textContent = '在线播放（已降级·视频流无音频，建议 MP4 或下载）：' + (title || '');
       } else {
@@ -1968,14 +2003,15 @@
         stopAudioStream();
         if (playerTitle) playerTitle.textContent = '在线播放（已降级）：' + (title || '');
       }
-      playerVideo.play().catch(function () { });
+      playerVideo.play().catch(advance);
     }).catch(function () {
-      // 播放阶段再次失败 → 继续降级
-      playerVideo.onerror = function () { playerFallback(title, depth + 1); };
-      playerVideo.play().catch(function () { playerFallback(title, depth + 1); });
+      if (req != null && req !== onlinePlayerReq) return;
+      // 取流接口失败 → 继续降级；不再重复 play 旧地址，避免重复触发 onerror
+      playerFallback(title, depth + 1, req);
     });
   }
-  function openOnlinePlayer(url, title) {
+  function openOnlinePlayer(url, title, req) {
+    if (req != null && req !== onlinePlayerReq) return;
     stopAudioStream();
     playerVideo.pause();
     playerVideo.removeAttribute('src');
@@ -1987,24 +2023,29 @@
       return proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
     };
     getProxyAuth().then(function (auth) {
+      if (req != null && req !== onlinePlayerReq) return;
       var tok = auth && auth.token ? auth.token : '';
       playerVideo.onerror = function () {
+        if (req != null && req !== onlinePlayerReq) return;
         if (!triedFallback) {
           triedFallback = true;
-          playerVideo.onerror = null;
           // 代理流失败 → 先试直链（Electron 主进程 webRequest 会注入 Referer）
+          // 不能清空 onerror，否则直链再失败时无法继续走 MP4 / DASH 降级链
           playerVideo.src = url;
           playerVideo.play().catch(function () { });
         } else {
           // 直链也失败 → 自动降级重试（MP4 / 720P / 更低）
           playerVideo.onerror = null;
-          playerFallback(title, 0);
+          playerFallback(title, 0, req);
         }
       };
       playerVideo.src = viaProxy(tok);
       playerModal.hidden = false;
       if (playerTitle) playerTitle.textContent = '在线播放：' + (title || '');
       playerVideo.play().catch(function () { });
+    }).catch(function () {
+      if (req != null && req !== onlinePlayerReq) return;
+      showPlayerError('播放失败：无法获取代理鉴权');
     });
   }
   var coverPlayBtn = $('cover-play-btn');
@@ -5225,6 +5266,8 @@
   function openPreview(path) {
     if (IS_ANDROID) { actOpenFile(path); return; }
     if (!playerModal || !playerVideo) return;
+    onlinePlayerReq++;
+    stopAudioStream();
     if (!path) { showToast('暂无文件可预览', 'warn'); return; }
     playerVideo.pause();
     playerVideo.removeAttribute('src');
@@ -5236,11 +5279,18 @@
     playerVideo.play().catch(function () { });
   }
   if (playerClose) playerClose.addEventListener('click', function () {
+    onlinePlayerReq++;
     playerModal.hidden = true;
     playerVideo.pause();
+    stopAudioStream();
   });
   if (playerModal) playerModal.addEventListener('click', function (e) {
-    if (e.target === playerModal) { playerModal.hidden = true; playerVideo.pause(); }
+    if (e.target === playerModal) {
+      onlinePlayerReq++;
+      playerModal.hidden = true;
+      playerVideo.pause();
+      stopAudioStream();
+    }
   });
 
   /* ---------- v1.3：批量下载独立界面 ---------- */
@@ -5252,6 +5302,10 @@
   // 打开批量下载面板（替换主界面），列出全部任务供预览，点击「开始」后并发入队
   function openBatchPanel() {
     if (!current) return;
+    if (batchActive) {
+      showToast('当前批量下载仍在进行，请在左下角下载队列查看进度', 'warn');
+      return;
+    }
     var isSeason = current.kind === 'bangumi';
     var list = isSeason ? (current.episodes || []) : (current.pages || []);
     if (!list.length) { showToast('无可批量下载的 P / 集', 'warn'); return; }
@@ -5881,7 +5935,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.11';
+  var APP_VERSION = '1.8.12';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -6381,6 +6435,14 @@
     var text = estimateSizeText(hotDuration(), qn, type, 192);
     hotDlSize.textContent = text ? (type === 'audio' ? '预估音频大小：' + text : '预估视频大小：' + text) : '时长未知，下载后可查看实际大小';
   }
+  function stopHotPlayback() {
+    hotWatchState.requestId++;
+    if (hotVideo) {
+      try { hotVideo.pause(); } catch (e) { }
+      try { hotVideo.removeAttribute('src'); hotVideo.load(); } catch (e) { }
+    }
+    setHotLoading('');
+  }
   function setHotLoading(text) {
     if (!hotWatchLoading) return;
     if (!text) { hotWatchLoading.hidden = true; return; }
@@ -6437,17 +6499,25 @@
         var viaProxy = proxyBase() + '/stream?url=' + encodeURIComponent(url) + (tok ? '&token=' + encodeURIComponent(tok) : '');
         var triedDirect = false;
         hotVideo.onerror = function () {
+          if (requestId != null && requestId !== hotWatchState.requestId) return;
           if (triedDirect) { setHotLoading('播放失败，可切换清晰度或使用完整下载选项'); return; }
           triedDirect = true;
-          hotVideo.onerror = null;
+          // 保留 onerror，直链也失败时才能把失败原因反馈到播放栏
           hotVideo.src = url;
-          hotVideo.play().catch(function () { setHotLoading('点击播放器开始播放'); });
+          hotVideo.play().catch(function () {
+            if (requestId != null && requestId !== hotWatchState.requestId) return;
+            setHotLoading('点击播放器开始播放');
+          });
         };
         hotVideo.src = viaProxy;
         hotVideo.play().catch(function () {
           // 自动播放被拦截时保留原生 controls，让用户手动点击播放
+          if (requestId != null && requestId !== hotWatchState.requestId) return;
           setHotLoading('点击播放器开始播放');
         });
+      }).catch(function () {
+        if (requestId != null && requestId !== hotWatchState.requestId) return;
+        setHotLoading('播放失败：代理鉴权失败');
       });
     };
     var tryMp4 = function (q) {
@@ -6459,7 +6529,10 @@
       });
     };
     tryMp4(qn).catch(function () { return tryMp4(64); }).catch(function () { return tryMp4(32); })
-      .catch(function (e) { setHotLoading('播放失败：' + (e && e.message ? e.message : '网络错误') + '，可切换清晰度或使用完整下载选项'); });
+      .catch(function (e) {
+        if (requestId != null && requestId !== hotWatchState.requestId) return;
+        setHotLoading('播放失败：' + (e && e.message ? e.message : '网络错误') + '，可切换清晰度或使用完整下载选项');
+      });
   }
   function startHotDownload() {
     var cur = hotWatchState.current;
@@ -6487,7 +6560,7 @@
     showToast('⏳ 已加入下载队列：' + cur.title, 'ok');
   }
   if (hotWatchClose) hotWatchClose.addEventListener('click', function () {
-    if (hotVideo) { hotVideo.pause(); hotVideo.removeAttribute('src'); hotVideo.load(); }
+    stopHotPlayback();
     if (hotWatch) hotWatch.hidden = true;
   });
   if (hotTypeSeg) hotTypeSeg.addEventListener('click', function (ev) {
@@ -6516,7 +6589,7 @@
   }
   function openHotVideo(item) {
     if (!item || !item.bvid) return;
-    if (hotVideo) { try { hotVideo.pause(); } catch (e) { } }
+    stopHotPlayback();
     if (contentMode !== 'video') applyContentMode('video', { focus: true });
     if (inputEl) inputEl.value = item.bvid.indexOf('av') === 0 ? item.bvid : ('https://www.bilibili.com/video/' + item.bvid);
     if (typeof startParse === 'function') startParse(item.bvid);
@@ -6589,8 +6662,9 @@
 
   function applyContentMode(mode, opts) {
     if (mode !== 'hot' && mode !== 'bangumi' && mode !== 'movie' && mode !== 'video') mode = 'video';
-    // 离开热门页时必须暂停内嵌播放器，否则切到视频 / 番剧频道后音频仍在后台播放
-    if (mode !== 'hot' && hotVideo) { try { hotVideo.pause(); } catch (e) { } }
+    // 离开热门页时必须停止内嵌播放器，并作废仍在路上的播放请求，
+    // 否则切到视频 / 番剧频道后音频可能在后台残留，或延迟请求把播放器重新拉起来
+    if (mode !== 'hot') stopHotPlayback();
     // 手机端保持原有视频界面，桌面端才开放热门 / 番剧 / 电影频道
     if ((IS_ANDROID || (window.innerWidth && window.innerWidth <= 520)) && (!opts || !opts.force)) mode = 'video';
     var previous = contentMode;
