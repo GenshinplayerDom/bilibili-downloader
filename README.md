@@ -1,6 +1,6 @@
 # 哔哩下载器 · GenshinplayerDom
 
-B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.13**（线上最新发布 v1.8.13；上一版 v1.8.12 也已发布）。作者 GenshinplayerDom，MIT License。
+B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.14**（线上最新发布 v1.8.14；上一版 v1.8.13 也已发布）。作者 GenshinplayerDom，MIT License。
 
 > 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 
@@ -23,14 +23,14 @@ B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 W
 
 ## 下载与安装
 
-最新版本：**[v1.8.13](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.13)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
+最新版本：**[v1.8.14](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.14)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
 
 | 文件 | 适用场景 | 大小 |
 | --- | --- | --- |
-| [BiliDownloader-1.8.13-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.13/BiliDownloader-1.8.13-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
-| [BiliDownloader-1.8.13-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.13/BiliDownloader-1.8.13-x64-portable.zip) | 64 位免安装便携版 | 179MB |
+| [BiliDownloader-1.8.14-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.14/BiliDownloader-1.8.14-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
+| [BiliDownloader-1.8.14-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.14/BiliDownloader-1.8.14-x64-portable.zip) | 64 位免安装便携版 | 179MB |
 
-> 本轮发布 64 位版本；32 位版本未随 1.8.13 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
+> 本轮发布 64 位版本；32 位版本未随 1.8.14 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
 > 安装版与便携版都内置 FFmpeg，无需额外安装；便携版解压即用，配置与下载记录仍写在用户目录。
 
 ## 现有功能
@@ -131,6 +131,8 @@ Linux / macOS 使用 `bash ./gradlew :app:assembleDebug`。Wrapper 使用 Gradle
 - `bilibili-downloader.user.js`：油猴脚本（浏览器直用版）。
 
 ## 版本历史
+
+- **v1.8.14**：番剧 / 电影搜索页新增「搜 UP 主」模式：支持按昵称、UID、`space.bilibili.com/…` 检索 UP 主，展示头像、粉丝数、投稿数与认证信息；选中后按发布时间查看该 UP 主投稿，点击投稿自动切到「视频」频道并进入下载页。UP 搜索与番剧 / 电影搜索各自隔离请求，切换模式不会串结果。
 
 - **v1.8.13**：番剧 / 分P批量下载重做文件命名：番剧按「番剧名 第n集 本集名」落盘，自动去掉季度标题里的「（N 集）」与剧集名外层括号；视频批量只保留本视频 / 分P名称，不再拼接父标题、`[P 序号]` 或 `[集名]` 标签。批量列表行名与最终文件名保持一致。
 - **v1.8.12**：在线播放 / 热门播放的代理流失败转直链后，直链再失败会继续执行 MP4 → DASH 降级，不再停在黑屏；新增播放请求令牌，切换视频、关闭播放器或解析新链接后，迟到的取流 / 鉴权 / DASH 音频不再覆盖播放器或后台开声；离开热门频道与关闭热门播放栏会清空视频地址并作废旧请求；批量任务进行中再次打开批量面板不再重置选中状态；预告 / 花絮缺失时长时回退影片时长，不再串用正片时长。

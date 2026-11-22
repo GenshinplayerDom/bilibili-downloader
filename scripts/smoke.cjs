@@ -72,6 +72,27 @@ const { execFileSync } = require('node:child_process');
             }))
           };
         }
+        if (upstream.pathname.endsWith('/x/web-interface/search/type') && upstream.searchParams.get('search_type') === 'bili_user') {
+          data = {
+            numResults: 2,
+            result: [
+              { mid: 946974, uname: '影视飓风', usign: '无限进步｜影视制作与数码评测', fans: 19159960, videos: 939, upic: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', verify_info: '2025百大UP主' },
+              { mid: 123456, uname: '测试UP主', usign: '一个用来验证昵称搜索的账号', fans: 12000, videos: 8, upic: '', verify_info: '' }
+            ]
+          };
+        }
+        if (upstream.pathname.endsWith('/x/space/wbi/arc/search')) data = {
+          page: { pn: Number(upstream.searchParams.get('pn')) || 1, ps: 20, count: 3 },
+          list: { vlist: [1, 2, 3].map(i => ({
+            bvid: 'BV1up00000' + i + '2', aid: 900 + i, title: 'UP 投稿视频 ' + i,
+            pic: '', length: i === 2 ? '1:02:03' : (10 + i) + ':00', play: 1000 * i,
+            description: '投稿视频简介 ' + i, author: '影视飓风', mid: 946974, created: 1700000000 + i
+          })) }
+        };
+        if (upstream.pathname.endsWith('/x/web-interface/card')) data = {
+          card: { mid: '946974', name: '影视飓风', face: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', fans: 19159960, sign: '无限进步｜影视制作与数码评测', official_verify: { desc: '2025百大UP主' } },
+          archive_count: 939
+        };
         if (upstream.pathname.endsWith('/view') && upstream.searchParams.get('bvid') === 'BV1upower1x7') data = {
           bvid: 'BV1upower1x7', aid: 7, cid: 70, title: '充电专属测试', pic: '', duration: 10, owner: { name: 'UP' },
           stat: { view: 1 }, is_upower_exclusive: true, pages: [{ page: 1, cid: 70, part: '正片', duration: 10 }]
@@ -481,6 +502,54 @@ const { execFileSync } = require('node:child_process');
     await page.locator('.content-tab[data-content="hot"]').click();
     await page.locator('#hot-watch-close').click();
     assert.equal(await page.locator('#hot-watch').isHidden(), true, '关闭按钮应收起热门播放栏');
+
+    // 番剧 / 电影频道新增 UP 主搜索：昵称与 UID 都能搜到，选择后查看投稿并进入视频下载页
+    await page.locator('.content-tab[data-content="bangumi"]').click();
+    await page.locator('#pgc-search-page').waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('#pgc-mode-up').click();
+    assert.match(await page.locator('#pgc-search-input').getAttribute('placeholder'), /UP 主/, '切到 UP 模式后应提示输入昵称或 UID');
+    await page.locator('#pgc-search-input').fill('影视飓风');
+    await page.locator('#pgc-search-btn').click();
+    await page.waitForFunction(() => document.querySelectorAll('.up-result-card').length === 2, null, { timeout: 15000 });
+    assert.match(await page.locator('.up-result-card').first().innerText(), /影视飓风[\s\S]*UID 946974/, '昵称搜索应返回 UP 主与 UID');
+    fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
+    const upShot = await application.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (!win.isVisible()) win.show();
+      await new Promise(resolve => setTimeout(resolve, 250));
+      return (await win.webContents.capturePage()).toPNG().toString('base64');
+    });
+    fs.writeFileSync(path.join(root, 'artifacts/up-search.png'), Buffer.from(upShot, 'base64'));
+    await page.locator('.up-result-card').first().click();
+    await page.waitForFunction(() => document.querySelectorAll('.pgc-result-card').length === 3, null, { timeout: 15000 });
+    assert.equal(await page.locator('#pgc-results-title').innerText(), '投稿视频');
+    assert.equal(await page.locator('#pgc-up-back').isVisible(), true, 'UP 投稿页应提供返回 UP 搜索的入口');
+    assert.match(await page.locator('.pgc-result-card').nth(1).innerText(), /1:02:03/, '投稿时长应按 h:mm:ss 展示');
+    const upVideosShot = await application.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      return (await win.webContents.capturePage()).toPNG().toString('base64');
+    });
+    fs.writeFileSync(path.join(root, 'artifacts/up-videos.png'), Buffer.from(upVideosShot, 'base64'));
+    await page.locator('#pgc-up-back').click();
+    await page.waitForFunction(() => document.querySelectorAll('.up-result-card').length === 2, null, { timeout: 10000 });
+    await page.locator('.up-result-card').first().click();
+    await page.waitForFunction(() => document.querySelectorAll('.pgc-result-card').length === 3, null, { timeout: 10000 });
+    await page.locator('.pgc-result-card').first().click();
+    await page.locator('#result').waitFor({ state: 'visible', timeout: 10000 });
+    assert.equal(await page.locator('#url-input').inputValue(), 'BV1up0000012', '点击投稿应切到视频频道并填入 BV 号');
+    assert.match(await page.locator('#v-title').innerText(), /下载体验测试/, '投稿视频应进入普通视频解析流程');
+
+    await page.locator('.content-tab[data-content="bangumi"]').click();
+    await page.locator('#pgc-mode-up').click();
+    await page.locator('#pgc-search-input').fill('946974');
+    await page.locator('#pgc-search-btn').click();
+    await page.waitForFunction(() => document.querySelectorAll('.up-result-card').length === 1, null, { timeout: 15000 });
+    assert.match(await page.locator('.up-result-card').first().innerText(), /影视飓风[\s\S]*UID 946974/, 'UID 搜索应直接找到对应 UP 主');
+    await page.locator('.content-tab[data-content="movie"]').click();
+    assert.equal(await page.locator('#pgc-mode-media').innerText(), '搜电影', '电影频道应保留番剧 / 电影搜索入口');
+    await page.locator('.content-tab[data-content="hot"]').click();
+    await page.locator('#hot-page').waitFor({ state: 'visible', timeout: 10000 });
+
     // 等顶部刷新提示自动消失，截图只保留页面本身
     await page.waitForTimeout(1600);
     assert.deepEqual(errors, []);
