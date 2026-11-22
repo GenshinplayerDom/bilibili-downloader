@@ -1001,6 +1001,7 @@
     current = {
       kind: 'bangumi',
       seasonId: data.season_id,
+      seasonTitle: data.title || data.season_title || '',
       title: data.title || data.season_title || '',
       pic: fixCover((episodes[0] && episodes[0].pic) || data.pic),
       up: data.up || (data.up_info ? (data.up_info.uname || data.up_info.name) : ''),
@@ -1167,6 +1168,54 @@
     if (extras) chips.push('<span class="pgc-chip">预告花絮 <strong>' + extras + '</strong> 条</span>');
     if (current.duration) chips.push('<span class="pgc-chip">本集 ' + escHtml(fmtDur(current.duration)) + '</span>');
     meta.innerHTML = chips.join('');
+  }
+  /* 批量下载文件名：番剧「番剧名 第n集 本集名」，视频「本视频标题」 */
+  function stripEpisodePrefix(title) {
+    return String(title || '').trim()
+      .replace(/^第\s*(?:[0-9０-９]+|[一二三四五六七八九十百千]+)\s*[话集]\s*(?:[·:：\-—]\s*)?/, '')
+      .trim();
+  }
+  function stripSeasonDecor(title) {
+    return String(title || '').trim()
+      .replace(/\s*[（(]\s*(?:共|全)?\s*[0-9０-９]+\s*集\s*[）)]\s*$/, '')
+      .replace(/\s*[（(]\s*(?:电影|暂无正片)\s*[）)]\s*$/, '')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function pgcBatchEpisodeNumber(ep, idx) {
+    var title = String((ep && ep.title) || '');
+    var m = title.match(/第\s*([0-9０-９]+)\s*[话集]/);
+    var n = m ? m[1] : String(Number(idx) + 1);
+    n = String(n).replace(/[０-９]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0xFEE0); });
+    return '第' + n + '集';
+  }
+  function stripEpisodeDecor(title) {
+    return String(title || '').trim()
+      .replace(/^[\[【]\s*/, '').replace(/\s*[\]】]$/, '')
+      .replace(/^[（(]\s*/, '').replace(/\s*[）)]$/, '')
+      .trim();
+  }
+  function pgcBatchEpisodeSubtitle(ep, idx) {
+    var long = stripEpisodeDecor(stripEpisodePrefix(cleanSearchTitle((ep && ep.long_title) || '')));
+    if (long) return long;
+    return stripEpisodeDecor(stripEpisodePrefix(cleanSearchTitle((ep && ep.title) || '')));
+  }
+  function pgcBatchFileBase(seasonTitle, ep, idx) {
+    var season = stripSeasonDecor(cleanSearchTitle(seasonTitle || ''));
+    var num = pgcBatchEpisodeNumber(ep, idx);
+    var sub = pgcBatchEpisodeSubtitle(ep, idx);
+    return [season, num, sub].filter(Boolean).join(' ');
+  }
+  function videoBatchFileBase(ep, fallbackTitle) {
+    var title = cleanSearchTitle((ep && (ep.part || ep.title)) || '');
+    return title || cleanSearchTitle(fallbackTitle || '') || '视频';
+  }
+  function batchRowLabel(ep, idx, isSeason, fallbackTitle) {
+    if (isSeason) {
+      var num = pgcBatchEpisodeNumber(ep, idx);
+      var sub = pgcBatchEpisodeSubtitle(ep, idx);
+      return [num, sub].filter(Boolean).join(' ');
+    }
+    return cleanSearchTitle((ep && (ep.part || ep.title)) || '') || cleanSearchTitle(fallbackTitle || '') || '视频';
   }
   function pgcEpisodeName(ep, i) {
     var t = String((ep && ep.title) || '').trim();
@@ -2110,7 +2159,7 @@
       // 复用主界面 current 以走 createTask（从快照恢复）
       var saved = current;
       current = snap;
-      var t = createTask(safeName(it.title) + (type === 'video' ? '（视频）' : '（音频）'), type === 'video' ? '视频' : '音频');
+      var t = createTask(safeName(it.title), type === 'video' ? '视频' : '音频');
       t.type = type;
       t.settings = Object.assign({}, pref);
       t.settings.clip = '';
@@ -4187,7 +4236,7 @@
         var fmt = task.settings.format === 'mkv' ? 'mkv' : 'mp4';
         var clip = parseClip(task.settings.clip);
         var ext = fmt === 'mkv' ? 'mkv' : 'mp4';
-        var part = task._part || (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
+        var part = task._part != null ? task._part : (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
         var filename = safeName(current.title) + part + '_' + entry.qualityName + '.' + ext;
         var codecTip = '';
         if (entry.codecs && String(entry.codecs).indexOf('avc1') < 0) {
@@ -4315,7 +4364,7 @@
       var got = entry.quality || 0;
       setTaskNote(task, 'warn', '服务端实际返回：' + gotName + (got < qn ? '（未登录环境清晰度受限）' : '') + (entry.degraded ? '（已自动切换兼容格式）' : ''));
       var page2 = current.pages && current.pages[current.pageIndex];
-      var part = task._part || (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
+      var part = task._part != null ? task._part : (page2 && current.pages.length > 1 ? ' [P' + page2.page + ']' : '');
       var filename = safeName(current.title) + part + '_' + gotName + '.mp4';
       var url = entry.url;
       if (IS_ANDROID && window.biliAPI && window.biliAPI.download) {
@@ -4458,7 +4507,8 @@
       if (task.cancelled) throw new Error('已取消');
       var url = entry.url;
       var page = current.pages && current.pages[current.pageIndex];
-      var baseName = safeName(current.title) + (task._part || (page && current.pages.length > 1 ? ' [P' + page.page + ']' : ''));
+      var part = task._part != null ? task._part : (page && current.pages.length > 1 ? ' [P' + page.page + ']' : '');
+      var baseName = safeName(current.title) + part;
 
       if (fmt === 'm4a') {
         var filenameM4a = baseName + '_' + entry.bandwidthName + '.m4a';
@@ -5309,7 +5359,7 @@
     var isSeason = current.kind === 'bangumi';
     var list = isSeason ? (current.episodes || []) : (current.pages || []);
     if (!list.length) { showToast('无可批量下载的 P / 集', 'warn'); return; }
-    batchData = { list: list, isSeason: isSeason, selected: list.map(function () { return true; }) };
+    batchData = { list: list, isSeason: isSeason, baseTitle: current.title || '', selected: list.map(function () { return true; }) };
     var sub = (isSeason ? '番剧 ' : '分P / 收藏夹 ') + list.length + ' 个任务，将按并发上限同时下载（当前最多 ' + maxConcurrent + ' 项），其余自动排队。点击条目可勾选 / 取消，默认全选。批量下载不支持片段裁剪与附带弹幕/字幕。';
     if (batchSub) batchSub.textContent = sub;
     // 同步当前全局清晰度/线程等选项到批量面板
@@ -5389,7 +5439,7 @@
     var selected = batchData.selected || [];
     for (var i = 0; i < list.length; i++) {
       var p = list[i];
-      var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
+      var label = batchRowLabel(p, i, batchData.isSeason, batchData.baseTitle);
       var isSelected = !!selected[i];
       var row = document.createElement('div');
       row.className = 'batch-item' + (isSelected ? ' selected' : '') + ((states[i] && states[i].status === 'running') ? ' running' : '');
@@ -5531,16 +5581,20 @@
       tick();
     };
 
-    var startItem = function (p, rowIdx, label) {
+    var startItem = function (p, rowIdx) {
+      var fileBase = batchData.isSeason
+        ? pgcBatchFileBase(baseSource.seasonTitle || baseSource.title, p, rowIdx)
+        : videoBatchFileBase(p, baseSource.title);
       var source = JSON.parse(JSON.stringify(baseSource));
       source.bvid = p.bvid || baseSource.bvid;
       source.aid = p.aid || baseSource.aid;
       source.cid = p.cid || null;
       source.epId = batchData.isSeason ? (p.ep_id || p.id || null) : null;
       source.pageIndex = rowIdx;
-      var t = createTask(safeName(baseSource.title) + ' [' + label + ']', batchData.isSeason ? (baseSource.isMovie ? '电影' : '番剧') : '分P', source);
+      source.title = fileBase;
+      var t = createTask(safeName(fileBase), batchData.isSeason ? (baseSource.isMovie ? '电影' : '番剧') : '分P', source);
       t.type = type;
-      t._part = ' [' + label + ']';
+      t._part = '';   // 显式置空：不再给文件名追加 [P1 · xxx] 或 [集名]
       t.settings = Object.assign({}, pref);
       states[rowIdx] = { status: 'running' };
       renderBatchList(states);
@@ -5564,7 +5618,6 @@
         renderBatchList(states);
         finishOne();
       };
-      var label = batchData.isSeason ? (p.long_title || p.title || '') : ('P' + p.page + ' · ' + p.part);
       // 合集 API 不返回 cid：先补全（含标题/时长）再开始下载，避免任务启动即失败
       if (!p.cid && p.bvid) {
         states[rowIdx] = { status: 'queued', note: '正在获取视频信息…' };
@@ -5574,8 +5627,7 @@
           if (!d || !d.cid) throw new Error('未获取到该视频信息');
           p.cid = d.cid;
           if (d.aid) p.aid = d.aid;
-          if (!batchData.isSeason) label = 'P' + p.page + ' · ' + (d.title || p.part || '');
-          startItem(p, rowIdx, label);
+          startItem(p, rowIdx);
         }).catch(function (e) {
           if (stale()) { cancelledBeforeStart(); return; }
           states[rowIdx] = { status: 'error', note: (e && e.message ? e.message : '获取视频信息失败') };
@@ -5585,7 +5637,7 @@
         return;
       }
       if (stale()) { cancelledBeforeStart(); return; }
-      startItem(p, rowIdx, label);
+      startItem(p, rowIdx);
     };
 
     showToast('⏳ 已加入 ' + n + ' 个下载任务（同时最多 ' + maxConcurrent + ' 项，其余自动排队）', 'ok');
@@ -5935,7 +5987,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.12';
+  var APP_VERSION = '1.8.13';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');

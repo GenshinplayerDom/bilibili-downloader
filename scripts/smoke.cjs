@@ -114,7 +114,7 @@ const { execFileSync } = require('node:child_process');
             season_id: 33145, title: '番剧解析测试', season_title: '番剧解析测试', cover: 'https://i0.hdslb.com/cover.jpg',
             up_info: { name: '测试番组' }, stat: { views: 10, danmakus: 2, likes: 3, reply: 1 },
             episodes: [1, 2, 3].map(i => ({ ep_id: 318440 + i, aid: 1000 + i, bvid: 'BV1xx411c7m' + i, cid: 2000 + i,
-              title: '第 ' + i + ' 话', long_title: '剧集 ' + i, cover: 'https://i0.hdslb.com/ep' + i + '.jpg', duration: [600000, 1200000, 300000][i - 1] }))
+              title: '第 ' + i + ' 话', long_title: '[剧集 ' + i + ']', cover: 'https://i0.hdslb.com/ep' + i + '.jpg', duration: [600000, 1200000, 300000][i - 1] }))
           } };
         } else if (upstream.pathname.startsWith('/pgc/player/web/playurl') && upstream.searchParams.get('ep_id') === '900001') {
           // 大会员电影、无权限账号：只给 6 分钟试看
@@ -298,6 +298,11 @@ const { execFileSync } = require('node:child_process');
     await page.waitForFunction(() => /批量下载已全部结束/.test(document.body.innerText), null, { timeout: 60000 });
     assert.ok(fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length >= mp4Before + 3, '整季批量应下载 3 集');
     assert.equal(new Set(upstreamUrls.filter(u => u.includes('/pgc/player/web/playurl')).map(u => (/ep_id=(\d+)/.exec(u) || [])[1])).size, 3, '三个剧集应分别带自己的 ep_id 取流');
+    const pgcBatchNames = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4') && n.startsWith('番剧解析测试 第'));
+    assert.ok(pgcBatchNames.some(n => n.startsWith('番剧解析测试 第1集 剧集 1_')), '番剧批量文件名应为「番剧名 第n集 本集名」');
+    assert.ok(pgcBatchNames.some(n => n.startsWith('番剧解析测试 第3集 剧集 3_')), '番剧批量文件应使用每集自己的集号');
+    assert.equal(pgcBatchNames.some(n => n.includes('[剧集')), false, '番剧批量文件不应再保留 [集名] 标签');
+    assert.equal(pgcBatchNames.some(n => n.includes('（3 集）')), false, '番剧批量文件不应带季度集数后缀');
     await page.locator('#batch-back').click();
     await page.locator('#pgc-back').click();
     // 电影（大会员）：能读出来，但试看片段必须拒绝保存，不能当完整影片交付
@@ -395,6 +400,25 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#queue-back').click();
     assert.equal(await page.locator('#queue-panel').isHidden(), true, '队列关闭按钮应能收起浮层');
     assert.equal(await queueOrb.getAttribute('aria-expanded'), 'false');
+
+    // 视频批量命名：每个分P只保留本视频 / 分P名称，不再拼接 P 序号与父标题
+    await page.locator('.content-tab[data-content="video"]').click();
+    await page.locator('#url-input').fill('BV1xx411c7mD');
+    await page.locator('#url-input').press('Enter');
+    await page.waitForFunction(() => /下载体验测试/.test(document.querySelector('#v-title').textContent), null, { timeout: 10000 });
+    await page.locator('#btn-all').click();
+    await page.locator('#batch-panel').waitFor({ state: 'visible', timeout: 10000 });
+    const videoBatchNames = await page.locator('.batch-item-name').allTextContents();
+    assert.deepEqual(videoBatchNames, ['下载体验测试', '第二分 P'], '视频批量列表只显示原视频 / 分P名称');
+    const videoBatchBefore = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4')).length;
+    await page.locator('#batch-start').click();
+    await page.waitForFunction(() => /批量下载已全部结束/.test(document.body.innerText), null, { timeout: 60000 });
+    const videoFiles = fs.readdirSync(downloads).filter(n => n.endsWith('.mp4'));
+    assert.ok(videoFiles.length >= videoBatchBefore + 2, '视频批量应下载两个分P');
+    assert.ok(videoFiles.some(n => n.startsWith('第二分 P_')), '视频批量文件应保留分P原名');
+    assert.ok(videoFiles.some(n => n.startsWith('下载体验测试_')), '清理后标题为空的分P应回退原视频名');
+    assert.equal(videoFiles.some(n => n.includes('[P')), false, '视频批量文件不应再拼接 [P 序号]');
+    await page.locator('#batch-back').click();
 
     // 热门推荐独立频道：桌面端首次进入自动加载，页面没有搜索栏，刷新按钮重新请求
     await page.locator('.content-tab[data-content="hot"]').click();
