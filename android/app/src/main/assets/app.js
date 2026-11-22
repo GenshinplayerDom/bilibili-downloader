@@ -123,8 +123,28 @@
   var pgcPagePrev = $('pgc-page-prev');
   var pgcPageNext = $('pgc-page-next');
   var pgcPageInfo = $('pgc-page-info');
+  var upSearchPage = $('up-search-page');
+  var upSearchInput = $('up-search-input');
+  var upSearchBtn = $('up-search-btn');
+  var upSearchClear = $('up-search-clear');
+  var upSearchStatus = $('up-search-status');
+  var upQuick = $('up-quick');
+  var upResultsTitle = $('up-results-title');
+  var upResultsSub = $('up-results-sub');
+  var upResultsCount = $('up-results-count');
+  var upBack = $('up-back');
+  var upResultGrid = $('up-result-grid');
+  var upSearchEmpty = $('up-search-empty');
+  var upEmptyTitle = $('up-empty-title');
+  var upEmptyDesc = $('up-empty-desc');
+  var upSearchPager = $('up-search-pager');
+  var upPagePrev = $('up-page-prev');
+  var upPageNext = $('up-page-next');
+  var upPageInfo = $('up-page-info');
   var contentMode = 'video';
   var pgcSearchState = { kind: 'bangumi', kw: '', page: 1, pageSize: 20, total: 0 };
+  var upSearchState = { mode: 'search', kw: '', page: 1, pageSize: 20, total: 0, user: null, users: [], usersTotal: 0, usersPage: 1 };
+  var upSearchSeq = 0;
   var popularState = { items: [], loaded: false, loading: false, updatedAt: 0, error: '' };
   var resultEl = $('result');
   var typeSeg = $('type-seg');
@@ -269,9 +289,12 @@
   var dlCacheCount = $('dl-cache-count');
   var dlCacheClear = $('dl-cache-clear');
   var dlCacheRefresh = $('dl-cache-refresh');
-  var dlDirPath = $('dl-dir-path');
+  var dlDirSection = $('download-dir-section');
+  var dlDirInput = $('dl-dir-input');
+  var dlDirSave = $('dl-dir-save');
   var dlDirPick = $('dl-dir-pick');
   var dlDirOpen = $('dl-dir-open');
+  var dlDirReset = $('dl-dir-reset');
   var dlDirNote = $('dl-dir-note');
   var toastEl = $('toast');
 
@@ -336,7 +359,7 @@
       el.hidden = true;
     });
     // 代理区块：仅隐藏模式/端口/自定义相关行，保留「代理状态 / 一键修复 / 测速」
-    var proxySection = document.querySelector('.settings-panel .set-section:first-of-type');
+    var proxySection = document.getElementById('proxy-section');
     if (proxySection) {
       var head = proxySection.querySelector('h3');
       if (head && head.textContent.indexOf('代理') >= 0) {
@@ -377,25 +400,25 @@
       var e = document.getElementById(id);
       if (e) e.hidden = true;
     });
-    // 隐藏「本地下载目录」（浏览器下载目录由浏览器管理，网页内无法更改 / 打开）与「网络重置」（需原生网络栈权限）整段
+    // 隐藏「默认下载地址」（浏览器下载目录由浏览器管理，网页内无法更改 / 打开）与「网络重置」（需原生网络栈权限）整段
     var wSecs = document.querySelectorAll('.settings-panel .set-section');
     for (var wi = 0; wi < wSecs.length; wi++) {
       var wH = wSecs[wi].querySelector('h3');
-      if (wH && (wH.textContent.indexOf('网络重置') >= 0 || wH.textContent.indexOf('本地下载目录') >= 0)) wSecs[wi].hidden = true;
+      if (wH && (wH.textContent.indexOf('网络重置') >= 0 || wH.textContent.indexOf('默认下载地址') >= 0 || wH.textContent.indexOf('本地下载目录') >= 0)) wSecs[wi].hidden = true;
     }
-    // 使用教程中与「网络重置 / 本地下载目录」相关的条目在网页端不适用，隐藏
+    // 使用教程中与「网络重置 / 默认下载地址」相关的条目在网页端不适用，隐藏
     var wTut = document.querySelector('.tutorial');
     if (wTut) {
       var wLis = wTut.querySelectorAll('li');
       for (var wli = 0; wli < wLis.length; wli++) {
         var wtx = wLis[wli].textContent || '';
-        if (wtx.indexOf('网络被限速') >= 0 || wtx.indexOf('网络重置') >= 0 || wtx.indexOf('本地下载目录') >= 0) wLis[wli].hidden = true;
+        if (wtx.indexOf('网络被限速') >= 0 || wtx.indexOf('网络重置') >= 0 || wtx.indexOf('默认下载地址') >= 0 || wtx.indexOf('本地下载目录') >= 0) wLis[wli].hidden = true;
       }
     }
     // 首次使用说明弹窗中「可在设置→本地下载目录更改」一条在网页端不适用，隐藏
     var wGuides = document.querySelectorAll('.guide-item');
     for (var wg = 0; wg < wGuides.length; wg++) {
-      if ((wGuides[wg].textContent || '').indexOf('本地下载目录') >= 0) wGuides[wg].hidden = true;
+      if ((wGuides[wg].textContent || '').indexOf('默认下载地址') >= 0 || (wGuides[wg].textContent || '').indexOf('本地下载目录') >= 0) wGuides[wg].hidden = true;
     }
   }
 
@@ -5111,7 +5134,7 @@
   /* ---------- v1.2：主题 / 语言 / 限速 / 缓存锁定（优化10 · 功能11 · 功能14） ---------- */
   var I18N = {
     zh: {
-      appTitle: '哔哩下载器 · Dom', subTitle: '视频 / 番剧 / 电影，一键下载', searchPh: '粘贴 B 站链接 / BV 号，或输入关键词直接搜索',
+      appTitle: '哔哩下载器 · Dom', subTitle: '视频 / 番剧 / 电影 / UP 主，一键下载', searchPh: '粘贴 B 站链接 / BV 号，或输入关键词直接搜索',
       search: '🔍 搜索', clear: '清空', home: '🏠 主菜单', lite: '精简版', full: '完全版',
       video: '视频', audio: '音频', quality: '清晰度', codec: '编码', format: '封装', threads: '线程数', clip: '片段', timer: '定时', extras: '附带',
       export: '导出信息', download: '下载', thTitle: '标题', thViews: '播放量', thDanmaku: '弹幕', thDuration: '时长',
@@ -5131,7 +5154,7 @@
       pageLabels: { '20': '20 个 / 页', '30': '30 个 / 页（默认）', '50': '50 个 / 页', '100': '100 个 / 页' }
     },
     en: {
-      appTitle: 'Bili Downloader · Dom', subTitle: 'Videos / anime / movies, one-click download', searchPh: 'Paste a Bilibili link / BV ID, or type keywords to search',
+      appTitle: 'Bili Downloader · Dom', subTitle: 'Videos / anime / movies / creators, one-click download', searchPh: 'Paste a Bilibili link / BV ID, or type keywords to search',
       search: '🔍 Search', clear: 'Clear', home: '🏠 Home', lite: 'Lite', full: 'Full',
       video: 'Video', audio: 'Audio', quality: 'Quality', codec: 'Codec', format: 'Container', threads: 'Threads', clip: 'Clip', timer: 'Timer', extras: 'Extras',
       export: 'Export Info', download: 'Download', thTitle: 'Title', thViews: 'Views', thDanmaku: 'Danmaku', thDuration: 'Duration',
@@ -5987,7 +6010,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.13';
+  var APP_VERSION = '1.8.15';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -6197,33 +6220,66 @@
     });
   }
 
-  /* ---------- 本地下载目录（客户端版） ---------- */
+  /* ---------- 默认下载地址（客户端版，设置页顶部） ---------- */
   function refreshDlDir() {
-    if (!dlDirPath) return;
-    if (IS_ANDROID) {
-      dlDirPath.textContent = '系统「下载」目录';
-      if (dlDirPick) dlDirPick.hidden = true;
-      if (dlDirOpen) dlDirOpen.hidden = true;
-      if (dlDirNote) dlDirNote.textContent = 'Android 版文件自动保存到系统「下载」目录（可在文件管理器中查看）。';
+    if (!dlDirSection) return;
+    // Android 与网页版无法自定义本地目录：整段隐藏，避免展示不可用的输入框
+    if (IS_ANDROID || !window.biliAPI || !window.biliAPI.getDownloadDir) {
+      dlDirSection.hidden = true;
       return;
     }
-    if (window.biliAPI && window.biliAPI.getDownloadDir) {
-      var d = window.biliAPI.getDownloadDir();
-      var render = function (dir) {
-        dlDirPath.textContent = dir || '（未设置）';
-        dlDirPath.title = dir || '';
-      };
-      if (d && typeof d.then === 'function') {
-        d.then(render).catch(function () { dlDirPath.textContent = '（读取失败）'; });
-      } else {
-        render(d);
+    dlDirSection.hidden = false;
+    var d = window.biliAPI.getDownloadDir();
+    var render = function (dir) {
+      if (!dir) return;
+      if (dlDirInput) {
+        dlDirInput.value = dir;
+        dlDirInput.title = dir;
       }
+      if (dlDirNote) dlDirNote.textContent = '当前保存到：' + dir + '。可直接输入绝对路径，或点「选择文件夹」。';
+    };
+    if (d && typeof d.then === 'function') {
+      d.then(render).catch(function () {
+        if (dlDirNote) dlDirNote.textContent = '读取当前下载地址失败，可重新输入后保存。';
+      });
     } else {
-      dlDirPath.textContent = '（浏览器默认下载目录）';
-      if (dlDirPick) dlDirPick.hidden = true;
-      if (dlDirOpen) dlDirOpen.hidden = true;
-      if (dlDirNote) dlDirNote.textContent = '网页版由浏览器下载目录决定，无法自定义；请使用客户端版自定义保存位置。';
+      render(d);
     }
+  }
+  function saveDlDir() {
+    if (!window.biliAPI || !window.biliAPI.setDownloadDirPath) return;
+    var dir = dlDirInput ? String(dlDirInput.value || '').trim() : '';
+    if (!dir) {
+      showToast('请输入下载目录的绝对路径', 'warn');
+      if (dlDirInput) dlDirInput.focus();
+      return;
+    }
+    if (dlDirSave) { dlDirSave.disabled = true; dlDirSave.textContent = '保存中…'; }
+    window.biliAPI.setDownloadDirPath(dir).then(function (r) {
+      if (r && r.ok) {
+        if (dlDirInput) dlDirInput.value = r.dir;
+        refreshDlDir();
+        showToast('✅ 默认下载地址已保存：' + r.dir, 'ok');
+      } else {
+        showToast('保存失败：' + (r && r.error ? r.error : '未知错误'), 'fail');
+      }
+    }).catch(function (err) {
+      showToast('保存失败：' + (err && err.message ? err.message : '无法访问该目录'), 'fail');
+    }).then(function () {
+      if (dlDirSave) { dlDirSave.disabled = false; dlDirSave.textContent = '保存地址'; }
+    });
+  }
+  function resetDlDir() {
+    if (!window.biliAPI || !window.biliAPI.resetDownloadDir) return;
+    window.biliAPI.resetDownloadDir().then(function (r) {
+      if (r && r.ok) {
+        if (dlDirInput) dlDirInput.value = r.dir;
+        refreshDlDir();
+        showToast('✅ 已恢复系统默认下载地址：' + r.dir, 'ok');
+      } else {
+        showToast('恢复默认失败', 'fail');
+      }
+    }).catch(function () { showToast('恢复默认失败', 'fail'); });
   }
   function pickDlDir() {
     if (IS_ANDROID && window.biliAPI && window.biliAPI.chooseDownloadDir) {
@@ -6247,6 +6303,7 @@
     if (!window.biliAPI || !window.biliAPI.chooseDownloadDir) return;
     window.biliAPI.chooseDownloadDir().then(function (dir) {
       if (dir) {
+        if (dlDirInput) dlDirInput.value = dir;
         refreshDlDir();
         showToast('✅ 下载目录已更改：' + dir, 'ok');
       }
@@ -6260,8 +6317,13 @@
       if (!IS_ANDROID && !ok) showToast('无法打开目录', 'fail');
     }).catch(function () { showToast('无法打开目录', 'fail'); });
   }
+  if (dlDirSave) dlDirSave.addEventListener('click', saveDlDir);
+  if (dlDirInput) dlDirInput.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); saveDlDir(); }
+  });
   if (dlDirPick) dlDirPick.addEventListener('click', pickDlDir);
   if (dlDirOpen) dlDirOpen.addEventListener('click', openDlDir);
+  if (dlDirReset) dlDirReset.addEventListener('click', resetDlDir);
 
   // 代理方式
   proxyModeSelect.addEventListener('change', function () {
@@ -6712,10 +6774,318 @@
     });
   }
 
+  /* ---------- UP 主独立频道（与番剧 / 电影平级） ---------- */
+  function setUpSearchStatus(cls, text) {
+    if (!upSearchStatus) return;
+    upSearchStatus.className = 'pgc-search-status' + (cls ? ' ' + cls : '');
+    upSearchStatus.textContent = text || '';
+  }
+  function setUpSearchEmpty(title, desc) {
+    if (upSearchEmpty) upSearchEmpty.hidden = false;
+    if (upEmptyTitle) upEmptyTitle.textContent = title;
+    if (upEmptyDesc) upEmptyDesc.textContent = desc;
+  }
+  function setUpSearchPager() {
+    if (!upSearchPager) return;
+    var pages = Math.max(1, Math.ceil((upSearchState.total || 0) / upSearchState.pageSize));
+    upSearchPager.hidden = pages <= 1 || !upSearchState.kw;
+    if (upPageInfo) upPageInfo.textContent = '第 ' + upSearchState.page + ' / ' + pages + ' 页';
+    if (upPagePrev) upPagePrev.disabled = upSearchState.page <= 1;
+    if (upPageNext) upPageNext.disabled = upSearchState.page >= pages;
+  }
+  function clearUpSearchResults() {
+    if (upResultGrid) upResultGrid.innerHTML = '';
+    if (upResultsCount) upResultsCount.textContent = '';
+    if (upResultsTitle) upResultsTitle.textContent = '搜索结果';
+    if (upResultsSub) upResultsSub.textContent = '输入 UP 主昵称或 UID 开始搜索。';
+    if (upBack) upBack.hidden = true;
+    if (upSearchPager) upSearchPager.hidden = true;
+    setUpSearchEmpty('搜索 UP 主', '输入昵称或 UID，选中后查看其投稿视频。');
+    setUpSearchStatus('', '');
+  }
+  function parseSpaceMid(text) {
+    var v = String(text || '').trim();
+    var m = v.match(/space\.bilibili\.com\/(\d{1,12})/i) || v.match(/^(?:uid\s*[:：]?\s*)?(\d{1,12})$/i);
+    return m ? m[1] : '';
+  }
+  function normalizeUpUser(u, extra) {
+    u = u || {};
+    extra = extra || {};
+    var mid = String(u.mid || extra.mid || '');
+    var official = '';
+    if (u.official_verify && u.official_verify.desc) official = u.official_verify.desc;
+    else if (typeof u.verify_info === 'string') official = u.verify_info;
+    return {
+      mid: mid,
+      name: cleanSearchTitle(u.uname || u.name || ('UID ' + mid)),
+      face: fixCover(u.upic || u.face || ''),
+      fans: Number(u.fans) || 0,
+      videos: Number(u.videos || u.archive_count || extra.videos) || 0,
+      sign: cleanSearchTitle(u.usign || u.sign || ''),
+      verify: cleanSearchTitle(official || '')
+    };
+  }
+  function clockToSeconds(text) {
+    var parts = String(text || '').split(':').map(function (x) { return Number(x); });
+    if (!parts.length || parts.some(function (x) { return !isFinite(x); })) return 0;
+    return parts.reduce(function (sum, n) { return sum * 60 + n; }, 0);
+  }
+  function fmtVideoDuration(sec) {
+    var n = Math.max(0, Number(sec) || 0);
+    var h = Math.floor(n / 3600);
+    var m = Math.floor((n % 3600) / 60);
+    var s2 = Math.floor(n % 60);
+    return h ? (h + ':' + String(m).padStart(2, '0') + ':' + String(s2).padStart(2, '0'))
+      : (m + ':' + String(s2).padStart(2, '0'));
+  }
+  function normalizeUpVideo(v) {
+    v = v || {};
+    return {
+      bvid: v.bvid || '',
+      aid: v.aid || 0,
+      title: cleanSearchTitle(v.title || '未命名视频'),
+      cover: fixCover(v.pic || ''),
+      duration: clockToSeconds(v.length),
+      play: Number(v.play) || 0,
+      desc: cleanSearchTitle(v.description || '')
+    };
+  }
+  function renderUpSearchResults(users) {
+    if (!upResultGrid) return;
+    upResultGrid.innerHTML = '';
+    if (upBack) upBack.hidden = true;
+    if (upResultsTitle) upResultsTitle.textContent = '搜索结果';
+    if (!users.length) {
+      setUpSearchEmpty('没有找到相关 UP 主', '试试换一个昵称，或直接输入 UID / 空间链接。');
+      return;
+    }
+    if (upSearchEmpty) upSearchEmpty.hidden = true;
+    users.forEach(function (u) {
+      if (!u.mid) return;
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'up-result-card';
+      card.setAttribute('aria-label', '查看 UP 主 ' + u.name + ' 的投稿');
+      var meta = 'UID ' + u.mid;
+      if (u.fans) meta += ' · 粉丝 ' + fmtCount(u.fans);
+      if (u.videos) meta += ' · 投稿 ' + fmtCount(u.videos);
+      card.innerHTML = '<span class="up-avatar">' +
+          '<img alt="" loading="lazy" referrerpolicy="no-referrer" src="' + escHtml(u.face) + '">' +
+          '<span class="poster-fallback">' + escHtml(u.name.slice(0, 1) || 'U') + '</span>' +
+        '</span>' +
+        '<span class="up-main">' +
+          '<span class="up-name">' + escHtml(u.name) + '</span>' +
+          '<span class="up-meta">' + escHtml(meta) + '</span>' +
+          (u.verify ? '<span class="up-verify">' + escHtml(u.verify) + '</span>' : '') +
+          (u.sign ? '<span class="up-sign">' + escHtml(u.sign) + '</span>' : '') +
+        '</span>' +
+        '<span class="up-open">查看投稿 →</span>';
+      var img = card.querySelector('img');
+      var fb = card.querySelector('.poster-fallback');
+      if (img && fb) {
+        img.addEventListener('error', function () { img.style.display = 'none'; fb.hidden = false; });
+        img.addEventListener('load', function () { if (fb) fb.hidden = true; });
+      }
+      card.addEventListener('click', function () { openUpVideos(u, 1); });
+      upResultGrid.appendChild(card);
+    });
+  }
+  function renderUpVideoResults(videos, user) {
+    if (!upResultGrid) return;
+    upResultGrid.innerHTML = '';
+    if (upBack) upBack.hidden = false;
+    if (upResultsTitle) upResultsTitle.textContent = '投稿视频';
+    if (!videos.length) {
+      setUpSearchEmpty('暂无投稿', '该 UP 主暂时没有可展示的投稿，或接口被风控拦截，请稍后重试。');
+      return;
+    }
+    if (upSearchEmpty) upSearchEmpty.hidden = true;
+    videos.forEach(function (v) {
+      var item = normalizeUpVideo(v);
+      if (!item.bvid) return;
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'pgc-result-card';
+      card.setAttribute('aria-label', '打开投稿视频 ' + item.title);
+      var meta = ['▶ ' + fmtCount(item.play), fmtVideoDuration(item.duration)].filter(Boolean).join(' · ');
+      card.innerHTML = '<div class="pgc-result-poster">' +
+        '<img alt="" loading="lazy" referrerpolicy="no-referrer" src="' + escHtml(item.cover) + '">' +
+        '<span class="poster-fallback">' + escHtml(item.title.slice(0, 1) || '稿') + '</span>' +
+        '<span class="pgc-result-badge">投稿</span>' +
+        '</div>' +
+        '<div class="pgc-result-body"><h4 class="pgc-result-name">' + escHtml(item.title) + '</h4>' +
+        '<div class="pgc-result-meta">' + escHtml(meta) + '</div>' +
+        (item.desc ? '<p class="pgc-result-desc">' + escHtml(item.desc) + '</p>' : '') +
+        '<span class="pgc-result-open">打开下载页 →</span></div>';
+      var img = card.querySelector('img');
+      var fb = card.querySelector('.poster-fallback');
+      if (img && fb) img.addEventListener('error', function () { img.style.display = 'none'; fb.hidden = false; });
+      card.addEventListener('click', function () { openUpVideo(item); });
+      upResultGrid.appendChild(card);
+    });
+  }
+  function openUpVideo(v) {
+    if (!v || !v.bvid) return;
+    if (contentMode !== 'video') applyContentMode('video', { focus: true });
+    if (inputEl) inputEl.value = v.bvid;
+    if (typeof startParse === 'function') startParse(v.bvid);
+  }
+  function restoreUpSearch() {
+    if (!upSearchState.user || !upSearchState.users.length) return;
+    upSearchSeq++;
+    upSearchState.mode = 'search';
+    upSearchState.page = upSearchState.usersPage || 1;
+    upSearchState.total = upSearchState.usersTotal || upSearchState.users.length;
+    if (upSearchInput) upSearchInput.value = upSearchState.kw;
+    if (upSearchClear) upSearchClear.hidden = !upSearchState.kw;
+    renderUpSearchResults(upSearchState.users);
+    if (upResultsCount) upResultsCount.textContent = upSearchState.usersTotal ? ('共 ' + upSearchState.usersTotal + ' 位 UP 主') : '';
+    if (upResultsSub) upResultsSub.textContent = '「' + upSearchState.kw + '」的 UP 主搜索结果';
+    setUpSearchStatus('ok', '找到 ' + upSearchState.usersTotal + ' 位 UP 主，点击条目查看投稿');
+    setUpSearchPager();
+  }
+  function searchUpByMid(mid) {
+    var seq = ++upSearchSeq;
+    upSearchState = { mode: 'search', kw: mid, page: 1, pageSize: 20, total: 0, user: null, users: [], usersTotal: 0, usersPage: 1 };
+    clearUpSearchResults();
+    if (upSearchInput) upSearchInput.value = mid;
+    if (upSearchClear) upSearchClear.hidden = false;
+    setUpSearchStatus('loading', '正在查找 UID ' + mid + ' 的 UP 主…');
+    apiGet('https://api.bilibili.com/x/web-interface/card?mid=' + encodeURIComponent(mid), { preferProxy: true }).then(function (data) {
+      if (seq !== upSearchSeq) return;
+      var card = data && data.card;
+      if (!card) throw new Error('未找到该 UID 对应的 UP 主');
+      var user = normalizeUpUser(card, { mid: mid, videos: data && data.archive_count });
+      upSearchState.user = user;
+      upSearchState.users = [user];
+      upSearchState.usersTotal = 1;
+      upSearchState.total = 1;
+      renderUpSearchResults([user]);
+      if (upResultsCount) upResultsCount.textContent = 'UID ' + mid;
+      if (upResultsSub) upResultsSub.textContent = 'UID ' + mid + ' 的 UP 主';
+      setUpSearchStatus('ok', '找到「' + user.name + '」，点击条目查看投稿');
+      setUpSearchPager();
+    }).catch(function (err) {
+      if (seq !== upSearchSeq) return;
+      setUpSearchStatus('fail', '查找 UID 失败：' + (err && err.message ? err.message : '网络错误'));
+      setUpSearchEmpty('没有找到该 UP 主', '请检查 UID 是否正确；也可以改用昵称搜索。');
+    });
+  }
+  function doUpSearch(keyword, page) {
+    var kw = String(keyword || '').trim();
+    if (!kw) { setUpSearchStatus('warn', '请输入 UP 主昵称或 UID'); return; }
+    var mid = parseSpaceMid(kw);
+    if (mid) { searchUpByMid(mid); return; }
+    var pg = Math.max(1, Number(page) || 1);
+    var ps = 20;
+    var seq = ++upSearchSeq;
+    upSearchState = { mode: 'search', kw: kw, page: pg, pageSize: ps, total: 0, user: null, users: [], usersTotal: 0, usersPage: pg };
+    clearUpSearchResults();
+    setUpSearchStatus('loading', '正在搜索 UP 主「' + kw + '」…');
+    var signedPromise = wbiSign({ search_type: 'bili_user', keyword: kw, page: pg, page_size: ps }).then(function (signed) {
+      var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
+      return 'https://api.bilibili.com/x/web-interface/search/type?' + q;
+    }).catch(function () {
+      return 'https://api.bilibili.com/x/web-interface/search/type?search_type=bili_user&keyword=' + encodeURIComponent(kw) + '&page=' + pg + '&page_size=' + ps;
+    });
+    signedPromise.then(function (url) { return searchApiGet(url); }).then(function (json) {
+      if (seq !== upSearchSeq) return;
+      if (!json || json.code !== 0) throw new Error(biliErrorText(json));
+      var d = json.data || {};
+      var raw = Array.isArray(d.result) ? d.result : [];
+      var users = raw.filter(function (u) { return u && u.mid; }).map(function (u) { return normalizeUpUser(u); });
+      var total = Number(d.numResults) || users.length;
+      upSearchState.users = users;
+      upSearchState.usersTotal = total;
+      upSearchState.total = total;
+      upSearchState.user = users[0] || null;
+      renderUpSearchResults(users);
+      if (upResultsCount) upResultsCount.textContent = total ? ('共 ' + total + ' 位 UP 主') : '';
+      if (upResultsSub) upResultsSub.textContent = '「' + kw + '」的 UP 主搜索结果';
+      if (users.length) setUpSearchStatus('ok', '找到 ' + total + ' 位 UP 主，点击条目查看投稿');
+      else setUpSearchStatus('warn', '未找到相关 UP 主，试试其他昵称或直接输入 UID');
+      setUpSearchPager();
+    }).catch(function (err) {
+      if (seq !== upSearchSeq) return;
+      setUpSearchStatus('fail', '搜索 UP 主失败：' + (err && err.message ? err.message : '网络错误'));
+      setUpSearchEmpty('搜索失败', '请检查网络或稍后重试；也可以直接输入 UID。');
+    });
+  }
+  function openUpVideos(user, page) {
+    if (!user || !user.mid) return;
+    var pg = Math.max(1, Number(page) || 1);
+    var seq = ++upSearchSeq;
+    upSearchState.mode = 'videos';
+    upSearchState.user = user;
+    upSearchState.page = pg;
+    upSearchState.total = Number(user.videos) || 0;
+    if (upResultGrid) upResultGrid.innerHTML = '';
+    if (upResultsCount) upResultsCount.textContent = '';
+    if (upSearchPager) upSearchPager.hidden = true;
+    if (upSearchEmpty) upSearchEmpty.hidden = true;
+    if (upBack) upBack.hidden = false;
+    if (upResultsTitle) upResultsTitle.textContent = '投稿视频';
+    if (upResultsSub) upResultsSub.textContent = 'UP 主「' + user.name + '」的投稿';
+    setUpSearchStatus('loading', '正在获取「' + user.name + '」的投稿…');
+    var url = 'https://api.bilibili.com/x/space/wbi/arc/search?mid=' + encodeURIComponent(user.mid) + '&ps=20&pn=' + pg + '&order=pubdate';
+    apiGet(url, { preferProxy: true }).then(function (data) {
+      if (seq !== upSearchSeq) return;
+      var vlist = (data && data.list && Array.isArray(data.list.vlist)) ? data.list.vlist : [];
+      var total = Number(data && data.page && data.page.count) || vlist.length;
+      upSearchState.total = total;
+      upSearchState.user.videos = Math.max(Number(upSearchState.user.videos) || 0, total);
+      renderUpVideoResults(vlist, user);
+      if (upResultsCount) upResultsCount.textContent = total ? ('共 ' + total + ' 个投稿') : '';
+      if (upResultsSub) upResultsSub.textContent = 'UP 主「' + user.name + '」的投稿 · 第 ' + pg + ' 页';
+      if (vlist.length) setUpSearchStatus('ok', '已获取 ' + vlist.length + ' 个投稿' + (total ? '（共 ' + total + ' 个）' : ''));
+      else setUpSearchStatus('warn', '该 UP 主暂时没有可展示的投稿');
+      setUpSearchPager();
+    }).catch(function (err) {
+      if (seq !== upSearchSeq) return;
+      var msg = err && err.message ? err.message : '网络错误';
+      setUpSearchStatus('fail', '获取投稿失败：' + msg);
+      setUpSearchEmpty('获取投稿失败', msg + '。可稍后重试，登录账号有助于降低风控概率。');
+    });
+  }
+  function pageUpSearch(delta) {
+    var next = Math.max(1, (upSearchState.page || 1) + delta);
+    if (upSearchState.mode === 'videos' && upSearchState.user) openUpVideos(upSearchState.user, next);
+    else doUpSearch(upSearchState.kw, next);
+  }
+  if (upSearchBtn) upSearchBtn.addEventListener('click', function () { doUpSearch(upSearchInput ? upSearchInput.value : '', 1); });
+  if (upSearchInput) {
+    upSearchInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); doUpSearch(upSearchInput.value, 1); }
+    });
+    upSearchInput.addEventListener('input', function () {
+      if (upSearchClear) upSearchClear.hidden = !upSearchInput.value.trim();
+    });
+  }
+  if (upSearchClear) upSearchClear.addEventListener('click', function () {
+    upSearchInput.value = '';
+    upSearchClear.hidden = true;
+    upSearchSeq++;
+    upSearchState = { mode: 'search', kw: '', page: 1, pageSize: 20, total: 0, user: null, users: [], usersTotal: 0, usersPage: 1 };
+    clearUpSearchResults();
+    upSearchInput.focus();
+  });
+  if (upQuick) upQuick.addEventListener('click', function (ev) {
+    var chip = ev.target.closest ? ev.target.closest('.pgc-quick-chip') : null;
+    if (!chip) return;
+    var q = chip.getAttribute('data-q') || '';
+    if (!q) return;
+    if (upSearchInput) upSearchInput.value = q;
+    if (upSearchClear) upSearchClear.hidden = false;
+    doUpSearch(q, 1);
+  });
+  if (upBack) upBack.addEventListener('click', restoreUpSearch);
+  if (upPagePrev) upPagePrev.addEventListener('click', function () { if (upSearchState.page > 1) pageUpSearch(-1); });
+  if (upPageNext) upPageNext.addEventListener('click', function () { pageUpSearch(1); });
+
   function applyContentMode(mode, opts) {
-    if (mode !== 'hot' && mode !== 'bangumi' && mode !== 'movie' && mode !== 'video') mode = 'video';
+    if (mode !== 'hot' && mode !== 'bangumi' && mode !== 'movie' && mode !== 'video' && mode !== 'up') mode = 'video';
     // 离开热门页时必须停止内嵌播放器，并作废仍在路上的播放请求，
-    // 否则切到视频 / 番剧频道后音频可能在后台残留，或延迟请求把播放器重新拉起来
+    // 否则切到视频 / 番剧 / UP 主频道后音频可能在后台残留，或延迟请求把播放器重新拉起来
     if (mode !== 'hot') stopHotPlayback();
     // 手机端保持原有视频界面，桌面端才开放热门 / 番剧 / 电影频道
     if ((IS_ANDROID || (window.innerWidth && window.innerWidth <= 520)) && (!opts || !opts.force)) mode = 'video';
@@ -6733,6 +7103,7 @@
     if (videoWorkspace) videoWorkspace.hidden = mode !== 'video';
     if (hotPage) hotPage.hidden = mode !== 'hot';
     if (pgcSearchPage) pgcSearchPage.hidden = !(mode === 'bangumi' || mode === 'movie');
+    if (upSearchPage) upSearchPage.hidden = mode !== 'up';
     try { localStorage.setItem('biliContentMode', mode); } catch (e) { }
     if (mode === 'video') return;
     if (pgcPage && !pgcPage.hidden) hidePgcPage(true);
@@ -6744,6 +7115,10 @@
     document.body.classList.remove('overlay-active');
     if (mode === 'hot') {
       if (!popularState.loaded && !popularState.loading) loadPopular({ force: true });
+      return;
+    }
+    if (mode === 'up') {
+      if (previous !== mode && upSearchInput && (!opts || opts.focus !== false)) upSearchInput.focus();
       return;
     }
     updatePgcSearchLabels(mode);

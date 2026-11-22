@@ -551,6 +551,27 @@ function registerIpc() {
     saveDownloadDir(downloadDir);
     return { ok: true, dir: downloadDir };
   });
+  // 直接保存用户输入的绝对路径：先创建目录，再持久化，避免输入后重启又回到系统下载目录
+  ipcHandle('bili:set-download-dir-path', function (event, input) {
+    var raw = String(input == null ? '' : input).trim().replace(/^"+|"+$/g, '');
+    if (!raw) return { ok: false, error: '请输入下载目录路径' };
+    if (!path.isAbsolute(raw)) return { ok: false, error: '请输入绝对路径，例如 D:\\B站下载' };
+    var target = path.normalize(raw);
+    try {
+      fs.mkdirSync(target, { recursive: true });
+      if (!fs.statSync(target).isDirectory()) return { ok: false, error: '该路径不是目录' };
+    } catch (e) {
+      return { ok: false, error: '无法创建或访问该目录：' + (e && e.message ? e.message : '未知错误') };
+    }
+    downloadDir = target;
+    saveDownloadDir(downloadDir);
+    return { ok: true, dir: downloadDir };
+  });
+  ipcHandle('bili:reset-download-dir', function () {
+    downloadDir = app.getPath('downloads');
+    saveDownloadDir(downloadDir);
+    return { ok: true, dir: downloadDir };
+  });
   ipcHandle('bili:open-download-dir', function () {
     var dir = getDownloadDir();
     try {

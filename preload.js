@@ -7,7 +7,8 @@
  *   window.biliAPI.restartProxy()         重启内置代理（一键修复联动）
  *   window.biliAPI.getDownloadDir()       读取本地下载目录
  *   window.biliAPI.chooseDownloadDir()    弹出目录选择器
- *   window.biliAPI.setDownloadDir(dir)    保存下载目录
+ *   window.biliAPI.setDownloadDirPath(dir) 直接保存下载目录路径
+ *   window.biliAPI.resetDownloadDir()     恢复系统默认下载目录
  *   window.biliAPI.openDownloadDir()      在资源管理器中打开目录
  *   window.biliAPI.muxAvailable()         DASH 高清合并能力（ffmpeg）
  *   window.biliAPI.muxDownload(cfg)       DASH 高清下载 + 合并（返回 Promise）
@@ -54,6 +55,12 @@ contextBridge.exposeInMainWorld('biliAPI', {
     return ipcRenderer.invoke('bili:set-download-dir').then(function (r) {
       return r && r.ok ? r.dir : null;
     });
+  },
+  setDownloadDirPath: function (dir) {
+    return ipcRenderer.invoke('bili:set-download-dir-path', String(dir == null ? '' : dir));
+  },
+  resetDownloadDir: function () {
+    return ipcRenderer.invoke('bili:reset-download-dir');
   },
   openDownloadDir: function () {
     return ipcRenderer.invoke('bili:open-download-dir').then(function (r) {

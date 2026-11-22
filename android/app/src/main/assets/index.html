@@ -16,7 +16,7 @@
   <div class="logo">▶</div>
   <div class="header-text">
     <h1 id="app-title" data-i18n="appTitle">哔哩下载器</h1>
-    <p data-i18n="subTitle">视频 / 番剧 / 电影，一键下载</p>
+    <p data-i18n="subTitle">视频 / 番剧 / 电影 / UP 主，一键下载</p>
   </div>
   <div class="header-right">
     <button type="button" class="home-btn" id="home-btn" data-i18n="home" title="返回主菜单（保留本次下载历史）">🏠 主菜单</button>
@@ -29,12 +29,13 @@
 
 <main class="container">
 
-  <!-- 内容频道：热门推荐 / 视频 / 番剧 / 电影 -->
+  <!-- 内容频道：热门推荐 / 视频 / 番剧 / 电影 / UP 主 -->
   <nav class="content-tabs" id="content-tabs" role="tablist" aria-label="内容频道">
     <button type="button" class="content-tab" data-content="hot" role="tab" aria-selected="false">热门推荐</button>
     <button type="button" class="content-tab active" data-content="video" role="tab" aria-selected="true">视频</button>
     <button type="button" class="content-tab" data-content="bangumi" role="tab" aria-selected="false">番剧</button>
     <button type="button" class="content-tab" data-content="movie" role="tab" aria-selected="false">电影</button>
+    <button type="button" class="content-tab" data-content="up" role="tab" aria-selected="false">UP 主</button>
   </nav>
 
   <div class="video-workspace" id="video-workspace">
@@ -280,6 +281,53 @@
     </div>
   </section>
 
+  <!-- UP 主独立频道（与番剧 / 电影平级） -->
+  <section class="pgc-search-page up-search-page" id="up-search-page" hidden aria-labelledby="up-search-title">
+    <div class="pgc-search-hero">
+      <div class="pgc-search-eyebrow">
+        <span class="pgc-search-kind">UP 主专区</span>
+        <span class="pgc-search-scope">按昵称 / UID 检索</span>
+      </div>
+      <h2 class="pgc-search-title" id="up-search-title">找一位 UP 主</h2>
+      <p class="pgc-search-sub">输入 UP 主昵称、UID 或空间链接，选中搜索结果后查看 TA 的投稿视频。</p>
+      <div class="pgc-search-box up-search-box">
+        <input type="text" id="up-search-input" placeholder="UP 主昵称、UID 或 space.bilibili.com/…" autocomplete="off" spellcheck="false">
+        <button type="button" id="up-search-btn">搜索 UP 主</button>
+        <button type="button" id="up-search-clear" hidden>清空</button>
+      </div>
+      <div class="pgc-search-hint" id="up-search-hint">支持昵称、UID、space.bilibili.com/…；选中后按发布时间查看最近投稿。</div>
+      <div class="pgc-search-status" id="up-search-status" role="status" aria-live="polite"></div>
+      <div class="pgc-quick" id="up-quick">
+        <span class="pgc-quick-label">快捷搜索</span>
+        <button type="button" class="pgc-quick-chip" data-q="影视飓风">影视飓风</button>
+        <button type="button" class="pgc-quick-chip" data-q="老师好我叫何同学">老师好我叫何同学</button>
+        <button type="button" class="pgc-quick-chip" data-q="罗翔说刑法">罗翔说刑法</button>
+      </div>
+    </div>
+
+    <div class="pgc-results-head">
+      <div>
+        <h3 id="up-results-title">搜索结果</h3>
+        <p id="up-results-sub">输入 UP 主昵称或 UID 开始搜索。</p>
+      </div>
+      <div class="pgc-results-head-right">
+        <button type="button" class="mini-btn" id="up-back" hidden>← 返回 UP 主</button>
+        <span class="pgc-results-count" id="up-results-count"></span>
+      </div>
+    </div>
+    <div class="pgc-result-grid" id="up-result-grid"></div>
+    <div class="pgc-search-empty" id="up-search-empty">
+      <div class="pgc-empty-icon">◉</div>
+      <h4 id="up-empty-title">搜索 UP 主</h4>
+      <p id="up-empty-desc">输入昵称或 UID，选中后查看其投稿视频。</p>
+    </div>
+    <div class="pgc-search-pager" id="up-search-pager" hidden>
+      <button type="button" class="mini-btn" id="up-page-prev">上一页</button>
+      <span id="up-page-info">第 1 页</span>
+      <button type="button" class="mini-btn" id="up-page-next">下一页</button>
+    </div>
+  </section>
+
 </main>
 
 <!-- 左下角竖向操作栏（记录 + 设置） -->
@@ -515,8 +563,24 @@
       </div>
     </section>
 
+    <!-- 默认下载地址（放在设置页顶部，可直接输入或选择文件夹） -->
+    <section class="set-section" id="download-dir-section">
+      <h3>默认下载地址</h3>
+      <div class="set-block">
+        <label for="dl-dir-input">保存到</label>
+        <input type="text" id="dl-dir-input" placeholder="例如 D:\B站下载 或 C:\Users\你的用户名\Downloads" autocomplete="off" spellcheck="false">
+        <div class="dl-dir-actions">
+          <button type="button" class="set-btn primary" id="dl-dir-save">保存地址</button>
+          <button type="button" class="set-btn" id="dl-dir-pick">选择文件夹</button>
+          <button type="button" class="set-btn" id="dl-dir-open">打开目录</button>
+          <button type="button" class="set-btn" id="dl-dir-reset">恢复默认</button>
+        </div>
+        <div class="set-note" id="dl-dir-note">视频、音频、字幕和封面都会保存到这里。可以直接粘贴绝对路径，也可以点「选择文件夹」。</div>
+      </div>
+    </section>
+
     <!-- 代理 -->
-    <section class="set-section">
+    <section class="set-section" id="proxy-section">
       <h3>代理方式</h3>
       <div class="set-block">
         <label for="proxy-mode">模式</label>
@@ -613,20 +677,6 @@
         <button type="button" class="set-btn" id="set-import">导入设置</button>
       </div>
       <div class="set-note">限速仅客户端生效；设置可导出为 JSON 文件迁移到其他设备。</div>
-    </section>
-
-    <!-- 本地下载目录 -->
-    <section class="set-section">
-      <h3>本地下载目录</h3>
-      <div class="set-row">
-        <span class="set-label">保存到</span>
-        <span class="set-value" id="dl-dir-path">读取中…</span>
-      </div>
-      <div class="set-row">
-        <button type="button" class="set-btn" id="dl-dir-pick">更改目录</button>
-        <button type="button" class="set-btn" id="dl-dir-open">打开目录</button>
-      </div>
-      <div class="set-note" id="dl-dir-note">下载的文件将保存到你选择的本地目录；网页版由浏览器下载目录决定。</div>
     </section>
 
     <!-- 下载地址缓存 -->
@@ -881,7 +931,7 @@
       <div class="guide-item"><span class="guide-num">6</span> <b>多线程 4~16 可选</b>（默认 8），高清下载为视频流 + 音频流并行 + CDN 轮换加速，下载完成后自动无损合并。</div>
       <div class="guide-item"><span class="guide-num">7</span> 可同时下载多个视频 / 音频，每个任务独立进度，<b>支持中途取消</b>；任务在本次使用期间保留，左下角 🕘 查看历史下载记录。</div>
       <div class="guide-item"><span class="guide-num">8</span> 本地代理自动初始化（无需手动操作）；左上角代理状态异常时可在「设置 → 一键修复」处理。</div>
-      <div class="guide-item"><span class="guide-num">9</span> 默认保存到「下载」目录，可在「设置 → 本地下载目录」更改。</div>
+      <div class="guide-item"><span class="guide-num">9</span> 默认保存到系统「下载」目录，可在「设置 → 默认下载地址」更改。</div>
     </div>
     <button type="button" class="guide-btn" id="guide-ok">我知道了，开始使用</button>
   </div>
