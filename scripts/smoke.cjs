@@ -82,14 +82,24 @@ const { execFileSync } = require('node:child_process');
             ]
           };
         }
-        if (upstream.pathname.endsWith('/x/space/wbi/arc/search')) data = {
-          page: { pn: Number(upstream.searchParams.get('pn')) || 1, ps: 20, count: 3 },
-          list: { vlist: [1, 2, 3].map(i => ({
-            bvid: 'BV1up00000' + i + '2', aid: 900 + i, title: 'UP 投稿视频 ' + i,
-            pic: '', length: i === 2 ? '1:02:03' : (10 + i) + ':00', play: 1000 * i,
-            description: '投稿视频简介 ' + i, author: '影视飓风', mid: 946974, created: 1700000000 + i
-          })) }
-        };
+        if (upstream.pathname.endsWith('/x/space/wbi/arc/search')) {
+          const pn = Number(upstream.searchParams.get('pn')) || 1;
+          const ps = Number(upstream.searchParams.get('ps')) || 50;
+          const total = 120;
+          const start = (pn - 1) * ps;
+          data = {
+            page: { pn, ps, count: total },
+            list: { vlist: Array.from({ length: Math.max(0, Math.min(ps, total - start)) }, (_, i) => {
+              const n = start + i + 1;
+              return {
+                bvid: n === 1 ? 'BV1up0000012' : ('BV1up' + String(100000 + n)),
+                aid: 900 + n, title: 'UP 投稿视频 ' + n,
+                pic: '', length: n === 2 ? '1:02:03' : ((10 + n) + ':00'), play: 1000 * n,
+                description: '投稿视频简介 ' + n, author: '影视飓风', mid: 946974, created: 1700000000 + n
+              };
+            }) }
+          };
+        }
         if (upstream.pathname.endsWith('/x/web-interface/card')) {
           const avatar = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" fill="#00aeec"/><text x="64" y="82" text-anchor="middle" font-family="Arial" font-size="58" font-weight="700" fill="#fff">影</text></svg>');
           data = {
@@ -533,10 +543,24 @@ const { execFileSync } = require('node:child_process');
     };
     await captureWindow('up-search.png');
     await page.locator('#up-result-grid .up-result-card').first().click();
-    await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .pgc-result-card').length === 3, null, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .pgc-result-card').length === 50, null, { timeout: 15000 });
     assert.equal(await page.locator('#up-results-title').innerText(), '投稿视频');
     assert.equal(await page.locator('#up-back').isVisible(), true, '投稿页应能返回 UP 主搜索结果');
     assert.match(await page.locator('#up-result-grid .pgc-result-card').nth(1).innerText(), /1:02:03/, '投稿时长应按 h:mm:ss 展示');
+    assert.match(await page.locator('#up-results-count').innerText(), /共 120 个投稿/, '投稿总数应取自接口 page.count');
+    assert.equal(await page.locator('#up-search-pager').isVisible(), true, '投稿超过一页时应显示分页器');
+    assert.match(await page.locator('#up-page-info').innerText(), /第 1 \/ 3 页 · 每页 50/, '投稿应每页 50 条并显示页数');
+    await page.locator('#up-page-next').click();
+    await page.waitForFunction(() => document.querySelector('#up-page-info')?.textContent.includes('第 2 / 3 页'), null, { timeout: 15000 });
+    assert.match(await page.locator('#up-result-grid .pgc-result-card').first().innerText(), /UP 投稿视频 51/, '第 2 页应展示第 51 条起的投稿');
+    const upVideoReqs = upstreamUrls.filter(u => u.includes('/x/space/wbi/arc/search'));
+    const lastUpVideoReq = new URL(upVideoReqs[upVideoReqs.length - 1]);
+    assert.equal(lastUpVideoReq.searchParams.get('ps'), '50', '投稿接口应每页请求 50 条');
+    assert.equal(lastUpVideoReq.searchParams.get('pn'), '2', '翻页应请求第 2 页');
+    assert.equal(lastUpVideoReq.searchParams.get('dm_img_list'), '[]', '投稿请求应带 dm 风控参数');
+    assert.ok(lastUpVideoReq.searchParams.get('w_rid'), '投稿请求应带 WBI 签名');
+    await page.locator('#up-page-prev').click();
+    await page.waitForFunction(() => document.querySelector('#up-page-info')?.textContent.includes('第 1 / 3 页'), null, { timeout: 15000 });
     await captureWindow('up-videos.png', 1160);
     // 窄窗口下左侧固定操作栏不能压住 UP 页内容
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(800, 700));
@@ -549,7 +573,7 @@ const { execFileSync } = require('node:child_process');
     await page.locator('#up-back').click();
     await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .up-result-card').length === 2, null, { timeout: 10000 });
     await page.locator('#up-result-grid .up-result-card').first().click();
-    await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .pgc-result-card').length === 3, null, { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll('#up-result-grid .pgc-result-card').length === 50, null, { timeout: 10000 });
     await page.locator('#up-result-grid .pgc-result-card').first().click();
     await page.locator('#result').waitFor({ state: 'visible', timeout: 10000 });
     assert.equal(await page.locator('#url-input').inputValue(), 'BV1up0000012', '点击投稿应切到视频频道并填入 BV 号');

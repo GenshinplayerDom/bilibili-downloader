@@ -145,6 +145,8 @@
   var pgcSearchState = { kind: 'bangumi', kw: '', page: 1, pageSize: 20, total: 0 };
   var upSearchState = { mode: 'search', kw: '', page: 1, pageSize: 20, total: 0, user: null, users: [], usersTotal: 0, usersPage: 1 };
   var upSearchSeq = 0;
+  var upVideoReqAt = 0;
+  var UP_VIDEO_PAGE_SIZE = 50;
   var popularState = { items: [], loaded: false, loading: false, updatedAt: 0, error: '' };
   var resultEl = $('result');
   var typeSeg = $('type-seg');
@@ -604,6 +606,7 @@
       return '该视频为「充电专属」内容：需要先为该 UP 主充电，并确保当前登录账号具备观看权限后再下载';
     }
     if (code === -10403) return '该内容在当前地区不可用（地区限制），请更换网络环境后重试';
+    if (code === -352 || code === -799) return 'B 站短时间请求过多，已触发风控；请等待 1~2 分钟后再翻页';
     if (code === -404 || code === 62002) return '该内容不存在或已被下架/删除';
     return msg;
   }
@@ -6010,7 +6013,7 @@
     });
   }
   // v1.5：自动更新——检测 GitHub Releases 最新版
-  var APP_VERSION = '1.8.16';
+  var APP_VERSION = '1.8.17';
   var UPDATE_TS_KEY = 'bili_update_ts';
   var updateInfo = $('update-info');
   var appVersionEl = $('app-version');
@@ -6787,9 +6790,11 @@
   }
   function setUpSearchPager() {
     if (!upSearchPager) return;
-    var pages = Math.max(1, Math.ceil((upSearchState.total || 0) / upSearchState.pageSize));
+    var per = upSearchState.mode === 'videos' ? UP_VIDEO_PAGE_SIZE : (upSearchState.pageSize || 20);
+    var pages = Math.max(1, Math.ceil((upSearchState.total || 0) / per));
     upSearchPager.hidden = pages <= 1 || !upSearchState.kw;
-    if (upPageInfo) upPageInfo.textContent = '第 ' + upSearchState.page + ' / ' + pages + ' 页';
+    if (upPageInfo) upPageInfo.textContent = '第 ' + upSearchState.page + ' / ' + pages + ' 页' +
+      (upSearchState.mode === 'videos' ? ' · 每页 ' + per : '');
     if (upPagePrev) upPagePrev.disabled = upSearchState.page <= 1;
     if (upPageNext) upPageNext.disabled = upSearchState.page >= pages;
   }
@@ -6935,6 +6940,7 @@
     upSearchSeq++;
     upSearchState.mode = 'search';
     upSearchState.page = upSearchState.usersPage || 1;
+    upSearchState.pageSize = 20;
     upSearchState.total = upSearchState.usersTotal || upSearchState.users.length;
     if (upSearchInput) upSearchInput.value = upSearchState.kw;
     if (upSearchClear) upSearchClear.hidden = !upSearchState.kw;
@@ -7011,6 +7017,30 @@
       setUpSearchEmpty('搜索失败', '请检查网络或稍后重试；也可以直接输入 UID。');
     });
   }
+  function upVideoPageUrl(mid, pg) {
+    // B 站新版空间接口会校验 dm_img 系列参数；固定一组合法浏览器指纹即可稳定翻页
+    var params = {
+      mid: mid,
+      ps: UP_VIDEO_PAGE_SIZE,
+      pn: pg,
+      tid: 0,
+      order: 'pubdate',
+      platform: 'web',
+      web_location: '333.1387',
+      order_avoided: 'true',
+      dm_img_list: '[]',
+      dm_img_str: 'V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ',
+      dm_cover_img_str: 'QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgUlRYIDMwNjAgKDB4MDAwMDI1MDQpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEpR29vZ2xlIEluYy4gKE5WSURJQQ',
+      dm_img_inter: '{"ds":[],"wh":[3711,4502,15],"of":[87,174,87]}'
+    };
+    return wbiSign(params).then(function (signed) {
+      var q = Object.keys(signed).map(function (k) { return k + '=' + encodeURIComponent(signed[k]); }).join('&');
+      return 'https://api.bilibili.com/x/space/wbi/arc/search?' + q;
+    }).catch(function () {
+      return 'https://api.bilibili.com/x/space/wbi/arc/search?mid=' + encodeURIComponent(mid) +
+        '&ps=' + UP_VIDEO_PAGE_SIZE + '&pn=' + pg + '&tid=0&order=pubdate';
+    });
+  }
   function openUpVideos(user, page) {
     if (!user || !user.mid) return;
     var pg = Math.max(1, Number(page) || 1);
@@ -7018,6 +7048,7 @@
     upSearchState.mode = 'videos';
     upSearchState.user = user;
     upSearchState.page = pg;
+    upSearchState.pageSize = UP_VIDEO_PAGE_SIZE;
     upSearchState.total = Number(user.videos) || 0;
     if (upResultGrid) upResultGrid.innerHTML = '';
     if (upResultsCount) upResultsCount.textContent = '';
@@ -7027,25 +7058,29 @@
     if (upResultsTitle) upResultsTitle.textContent = '投稿视频';
     if (upResultsSub) upResultsSub.textContent = 'UP 主「' + user.name + '」的投稿';
     setUpSearchStatus('loading', '正在获取「' + user.name + '」的投稿…');
-    var url = 'https://api.bilibili.com/x/space/wbi/arc/search?mid=' + encodeURIComponent(user.mid) + '&ps=20&pn=' + pg + '&order=pubdate';
-    apiGet(url, { preferProxy: true }).then(function (data) {
+    var delay = Math.max(0, 1600 - (Date.now() - upVideoReqAt));
+    upVideoReqAt = Date.now() + delay;
+    setTimeout(function () {
       if (seq !== upSearchSeq) return;
-      var vlist = (data && data.list && Array.isArray(data.list.vlist)) ? data.list.vlist : [];
-      var total = Number(data && data.page && data.page.count) || vlist.length;
-      upSearchState.total = total;
-      upSearchState.user.videos = Math.max(Number(upSearchState.user.videos) || 0, total);
-      renderUpVideoResults(vlist, user);
-      if (upResultsCount) upResultsCount.textContent = total ? ('共 ' + total + ' 个投稿') : '';
-      if (upResultsSub) upResultsSub.textContent = 'UP 主「' + user.name + '」的投稿 · 第 ' + pg + ' 页';
-      if (vlist.length) setUpSearchStatus('ok', '已获取 ' + vlist.length + ' 个投稿' + (total ? '（共 ' + total + ' 个）' : ''));
-      else setUpSearchStatus('warn', '该 UP 主暂时没有可展示的投稿');
-      setUpSearchPager();
-    }).catch(function (err) {
-      if (seq !== upSearchSeq) return;
-      var msg = err && err.message ? err.message : '网络错误';
-      setUpSearchStatus('fail', '获取投稿失败：' + msg);
-      setUpSearchEmpty('获取投稿失败', msg + '。可稍后重试，登录账号有助于降低风控概率。');
-    });
+      upVideoPageUrl(user.mid, pg).then(function (url) { return apiGet(url, { preferProxy: true }); }).then(function (data) {
+        if (seq !== upSearchSeq) return;
+        var vlist = (data && data.list && Array.isArray(data.list.vlist)) ? data.list.vlist : [];
+        var total = Number(data && data.page && data.page.count) || vlist.length;
+        upSearchState.total = total;
+        upSearchState.user.videos = Math.max(Number(upSearchState.user.videos) || 0, total);
+        renderUpVideoResults(vlist, user);
+        if (upResultsCount) upResultsCount.textContent = total ? ('共 ' + total + ' 个投稿') : '';
+        if (upResultsSub) upResultsSub.textContent = 'UP 主「' + user.name + '」的投稿 · 第 ' + pg + ' 页';
+        if (vlist.length) setUpSearchStatus('ok', '本页 ' + vlist.length + ' 个投稿，共 ' + total + ' 个；可用下方翻页查看全部');
+        else setUpSearchStatus('warn', '该 UP 主暂时没有可展示的投稿');
+        setUpSearchPager();
+      }).catch(function (err) {
+        if (seq !== upSearchSeq) return;
+        var msg = err && err.message ? err.message : '网络错误';
+        setUpSearchStatus('fail', '获取投稿失败：' + msg);
+        setUpSearchEmpty('获取投稿失败', msg + '。可稍后重试，登录账号有助于降低风控概率。');
+      });
+    }, delay);
   }
   function pageUpSearch(delta) {
     var next = Math.max(1, (upSearchState.page || 1) + delta);

@@ -1,12 +1,12 @@
 # 哔哩下载器 · GenshinplayerDom
 
-B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.16**（线上最新发布 v1.8.16；上一版 v1.8.15 已发布）。作者 GenshinplayerDom，MIT License。
+B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 WebView 和下载桥，另附油猴脚本。当前版本 **1.8.17**（线上最新发布 v1.8.17；上一版 v1.8.16 已发布）。作者 GenshinplayerDom，MIT License。
 
 > 本项目基于 **MIT License** 开源。请保留署名「GenshinplayerDom」，并遵循协议条款。
 
 - **视频 / 音频解析**：支持普通视频、分 P、番剧（`ss` / `ep`，含整季选集）、电影（PGC type=2，含试看片段拦截；油猴脚本同样支持番剧 / 电影页）、UP 主合集、收藏夹一键识别与解析；充电专属视频可识别并提示所需权限。
 - **番剧 / 电影独立下载页**：解析 PGC 后进入专属页面，展示评分、简介、地区、风格与预告花絮，提供 4K / 真彩 HDR / 60 帧、标准或高码率音轨、编码、封装、线程与片段等选项；正片与预告花絮可分开筛选下载。
-- **UP 主独立频道**：与番剧 / 电影平级，支持按昵称、UID、空间链接搜索 UP 主；结果展示头像、粉丝、投稿数与认证，选中后按发布时间查看投稿，点击投稿直接进入视频下载页。
+- **UP 主独立频道**：与番剧 / 电影平级，支持按昵称、UID、空间链接搜索 UP 主；结果展示头像、粉丝、投稿数与认证，选中后按发布时间查看投稿；投稿每页 50 条并带总数与页码，可翻页查看完整列表，点击投稿直接进入视频下载页。
 - **表格列表面板**：合集 / 收藏夹以表格展示（封面、标题、播放量、弹幕、时长），支持勾选 + 全选 / 全不选；单击「标题」进入单个视频下载详情，点标题左侧区域判定为勾选该项，避免误入详情。
 - **并发下载调度**：设置「同时下载数上限」（默认 8，按设备内存给出建议，最高 16 线程），超限任务自动排队显示「等待中」，任务完成后自动补位；支持一键中断 / 取消全部。
 - **批量下载**：番剧 / 分 P / 合集勾选批量加入队列，按并发上限同时调度（当前最多 8 项，其余自动排队）；每集使用独立 `source` 快照，不会串集或只跑第 1 集；批量面板支持逐集勾选、默认全选、全选后一键下载全部，并保留清晰度 / 编码 / 封装 / 音频格式 / 线程数选项；番剧文件按「番剧名 第n集 本集名」命名，视频 / 分P只保留本视频名，不再拼接季度集数与 [集名] 标签。
@@ -25,14 +25,14 @@ B 站视频 / 音频下载器。Windows 使用 Electron，Android 使用原生 W
 
 ## 下载与安装
 
-最新版本：**[v1.8.16](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.16)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
+最新版本：**[v1.8.17](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.17)**（发布页: https://github.com/GenshinplayerDom/bilibili-downloader/releases ）
 
 | 文件 | 适用场景 | 大小 |
 | --- | --- | --- |
-| [BiliDownloader-1.8.16-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.16/BiliDownloader-1.8.16-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
-| [BiliDownloader-1.8.16-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.16/BiliDownloader-1.8.16-x64-portable.zip) | 64 位免安装便携版 | 179MB |
+| [BiliDownloader-1.8.17-x64-Setup.exe](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.17/BiliDownloader-1.8.17-x64-Setup.exe) | 64 位 Windows 安装版（推荐） | 179MB |
+| [BiliDownloader-1.8.17-x64-portable.zip](https://github.com/GenshinplayerDom/bilibili-downloader/releases/download/v1.8.17/BiliDownloader-1.8.17-x64-portable.zip) | 64 位免安装便携版 | 179MB |
 
-> 本轮发布 64 位版本；32 位版本未随 1.8.16 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
+> 本轮发布 64 位版本；32 位版本未随 1.8.17 构建，可继续使用 [v1.8.8 32 位](https://github.com/GenshinplayerDom/bilibili-downloader/releases/tag/v1.8.8)。
 > 安装版与便携版都内置 FFmpeg，无需额外安装；便携版解压即用，配置与下载记录仍写在用户目录。
 
 ## 现有功能
@@ -134,6 +134,7 @@ Linux / macOS 使用 `bash ./gradlew :app:assembleDebug`。Wrapper 使用 Gradle
 
 ## 版本历史
 
+- **v1.8.17**：修复 UP 主投稿列表不完整：投稿接口改为 WBI 签名并补上 B 站新版 `dm_img` 风控参数，每页从 20 条提升到 50 条；分页显示总投稿数、当前页与每页条数，支持连续翻页查看全部投稿，并加入 1.6 秒请求间隔避免翻页触发风控。
 - **v1.8.16**：修复 UP 主页面 UI 缩放：桌面宽屏改为与番剧 / 电影一致的 1040px 宽版，1180px 以下自动预留左右操作栏安全边距，760px 以下收窄头像与卡片内边距，避免左侧记录 / 设置栏压住内容。
 - **v1.8.15**：UP 主改为顶层独立频道，与番剧 / 电影平级，不再嵌入番剧 / 电影搜索页；支持按昵称、UID、`space.bilibili.com/…` 搜索 UP 主，选中后查看其投稿视频，点击投稿自动切到「视频」频道下载；设置页新增可直接输入 / 选择 / 恢复默认的「默认下载地址」，保存时自动建目录并持久化。撤销 v1.8.14 的嵌入式入口。
 - **v1.8.13**：番剧 / 分P批量下载重做文件命名：番剧按「番剧名 第n集 本集名」落盘，自动去掉季度标题里的「（N 集）」与剧集名外层括号；视频批量只保留本视频 / 分P名称，不再拼接父标题、`[P 序号]` 或 `[集名]` 标签。批量列表行名与最终文件名保持一致。
